@@ -1,0 +1,4 @@
+/home/xiang/Project/my_dso/build/CMakeFiles/edit_cache.dir
+/home/xiang/Project/my_dso/build/CMakeFiles/rebuild_cache.dir
+/home/xiang/Project/my_dso/build/CMakeFiles/my_dso.dir
+/home/xiang/Project/my_dso/build/CMakeFiles/my_lib.dir

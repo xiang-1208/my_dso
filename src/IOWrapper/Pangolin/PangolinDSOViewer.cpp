@@ -1,0 +1,344 @@
+#include "PangolinDSOViewer.h"
+
+namespace IOWrap
+{
+PangolinDSOViewer::PangolinDSOViewer(int w, int h, bool startRunThread):w(w), h(h)
+{
+    running = true;
+    {
+        boost::unique_lock<boost::mutex> lk(openImagesMutex);
+        internalVideoImg = new MinimalImageB3(w,h);
+		internalKFImg = new MinimalImageB3(w,h);
+		internalResImg = new MinimalImageB3(w,h);
+        videoImgChanged=kfImgChanged=resImgChanged=true;
+
+		internalVideoImg->setBlack();
+		internalKFImg->setBlack();
+		internalResImg->setBlack();
+    }
+    {
+        currentCam = new KeyFrameDisplay();
+    }
+    needReset = false;
+
+    if(startRunThread)
+        runThread = boost::thread(&PangolinDSOViewer::run,this);
+}
+
+void PangolinDSOViewer::run()
+{
+    printf("START PANGOLIN!\n");
+    pangolin::CreateWindowAndBind("main",2*w,2*h);
+    const int UI_WIDTH = 180;
+    // 启动深度测试
+    glEnable(GL_DEPTH_TEST);
+
+    // 创建一个观察相机视图
+    // ProjectMatrix(int h, int w, int fu, int fv, int cu, int cv, int znear, int zfar) 
+    //      参数依次为观察相机的图像高度、宽度、4个内参以及最近和最远视距
+    // ModelViewLookAt(double x, double y, double z,double lx, double ly, double lz, AxisDirection Up)
+    //      参数依次为相机所在的位置，以及相机所看的视点位置(一般会设置在原点)
+	pangolin::OpenGlRenderState Visualization3D_camera(
+		pangolin::ProjectionMatrix(w,h,400,400,w/2,h/2,0.1,1000),
+		pangolin::ModelViewLookAt(-0,-5,-10, 0,0,0, pangolin::AxisNegY)
+		);
+	pangolin::View& Visualization3D_display = pangolin::CreateDisplay()
+		.SetBounds(0.0, 1.0, pangolin::Attach::Pix(UI_WIDTH), 1.0, -w/(float)h)
+		.SetHandler(new pangolin::Handler3D(Visualization3D_camera));
+
+    //3 images
+    pangolin::View& d_kfDepth = pangolin::Display("imgKFDepth").SetAspect(w/(float)h);
+    pangolin::View& d_video = pangolin::Display("imgVideo").SetAspect(w/(float)h);
+    pangolin::View& d_residual = pangolin::Display("imgResiduald").SetAspect(w/(float)h);
+    // 创建glTexture容器用于读取图像
+	pangolin::GlTexture texKFDepth(w,h,GL_RGB,false,0,GL_RGB,GL_UNSIGNED_BYTE);
+	pangolin::GlTexture texVideo(w,h,GL_RGB,false,0,GL_RGB,GL_UNSIGNED_BYTE);
+	pangolin::GlTexture texResidual(w,h,GL_RGB,false,0,GL_RGB,GL_UNSIGNED_BYTE);    
+
+    pangolin::CreateDisplay()
+		  .SetBounds(0.0, 0.3, pangolin::Attach::Pix(UI_WIDTH), 1.0)
+		  .SetLayout(pangolin::LayoutEqual)
+		  .AddDisplay(d_kfDepth)
+		  .AddDisplay(d_video)
+		  .AddDisplay(d_residual);
+        
+	// parameter reconfigure gui
+	pangolin::CreatePanel("ui").SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(UI_WIDTH));
+
+	pangolin::Var<int> settings_pointCloudMode("ui.PC_mode",1,1,4,false);
+
+	pangolin::Var<bool> settings_showKFCameras("ui.KFCam",false,true);
+	pangolin::Var<bool> settings_showCurrentCamera("ui.CurrCam",true,true);
+	pangolin::Var<bool> settings_showTrajectory("ui.Trajectory",true,true);
+	pangolin::Var<bool> settings_showFullTrajectory("ui.FullTrajectory",false,true);
+	pangolin::Var<bool> settings_showActiveConstraints("ui.ActiveConst",true,true);
+	pangolin::Var<bool> settings_showAllConstraints("ui.AllConst",false,true);
+
+
+	pangolin::Var<bool> settings_show3D("ui.show3D",true,true);
+	pangolin::Var<bool> settings_showLiveDepth("ui.showDepth",true,true);
+	pangolin::Var<bool> settings_showLiveVideo("ui.showVideo",true,true);
+    pangolin::Var<bool> settings_showLiveResidual("ui.showResidual",false,true);
+
+	pangolin::Var<bool> settings_showFramesWindow("ui.showFramesWindow",false,true);
+	pangolin::Var<bool> settings_showFullTracking("ui.showFullTracking",false,true);
+	pangolin::Var<bool> settings_showCoarseTracking("ui.showCoarseTracking",false,true);
+
+
+	pangolin::Var<int> settings_sparsity("ui.sparsity",1,1,20,false);
+	pangolin::Var<double> settings_scaledVarTH("ui.relVarTH",0.001,1e-10,1e10, true);
+	pangolin::Var<double> settings_absVarTH("ui.absVarTH",0.001,1e-10,1e10, true);
+	pangolin::Var<double> settings_minRelBS("ui.minRelativeBS",0.1,0,1, false);
+
+
+	pangolin::Var<bool> settings_resetButton("ui.Reset",false,false);
+
+
+	pangolin::Var<int> settings_nPts("ui.activePoints",setting_desiredPointDensity, 50,5000, false);
+	pangolin::Var<int> settings_nCandidates("ui.pointCandidates",setting_desiredImmatureDensity, 50,5000, false);
+	pangolin::Var<int> settings_nMaxFrames("ui.maxFrames",setting_maxFrames, 4,10, false);
+	pangolin::Var<double> settings_kfFrequency("ui.kfFrequency",setting_kfGlobalWeight,0.1,3, false);
+	pangolin::Var<double> settings_gradHistAdd("ui.minGradAdd",setting_minGradHistAdd,0,15, false);
+
+	pangolin::Var<double> settings_trackFps("ui.Track fps",0,0,0,false);
+	pangolin::Var<double> settings_mapFps("ui.KF fps",0,0,0,false);
+
+    while( !pangolin::ShouldQuit() && running )
+    {
+        // 清空颜色和深度缓存
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        if(setting_render_display3D)       
+        {
+            Visualization3D_display.Activate(Visualization3D_camera);
+            boost::unique_lock<boost::mutex> lk3d(model3DMutex);
+            int refreshed=0;
+            for(KeyFrameDisplay* fh : keyframes)
+            {
+                float blue[3] = {0,0,1};
+                if(this->settings_showKFCameras);
+                    fh->drawCam(1,blue,0.1);
+
+                refreshed += (int)(fh->refreshPC(refreshed <10,this->settings_scaledVarTH, this->settings_absVarTH,
+						this->settings_pointCloudMode, this->settings_minRelBS, this->settings_sparsity));
+                fh->drawPC(1);
+            }
+            if(this->settings_showCurrentCamera) currentCam->drawCam(2,0,0.2);
+            drawConstraints();
+            lk3d.unlock();
+        } 
+
+		openImagesMutex.lock();
+		if(videoImgChanged) 	texVideo.Upload(internalVideoImg->data,GL_BGR,GL_UNSIGNED_BYTE);
+		if(kfImgChanged) 		texKFDepth.Upload(internalKFImg->data,GL_BGR,GL_UNSIGNED_BYTE);
+		if(resImgChanged) 		texResidual.Upload(internalResImg->data,GL_BGR,GL_UNSIGNED_BYTE);
+		videoImgChanged=kfImgChanged=resImgChanged=false;
+		openImagesMutex.unlock();
+
+		// update fps counters
+		{
+			openImagesMutex.lock();
+			float sd=0;
+			for(float d : lastNMappingMs) sd+=d;
+			settings_mapFps=lastNMappingMs.size()*1000.0f / sd;
+			openImagesMutex.unlock();
+		}    
+		{
+			model3DMutex.lock();
+			float sd=0;
+			for(float d : lastNTrackingMs) sd+=d;
+			settings_trackFps = lastNTrackingMs.size()*1000.0f / sd;
+			model3DMutex.unlock();
+		} 
+
+		if(setting_render_displayVideo)
+		{
+			d_video.Activate();
+			glColor4f(1.0f,1.0f,1.0f,1.0f);
+			texVideo.RenderToViewportFlipY();
+		}
+		if(setting_render_displayDepth)
+		{
+			d_kfDepth.Activate();
+			glColor4f(1.0f,1.0f,1.0f,1.0f);
+			texKFDepth.RenderToViewportFlipY();
+		}
+		if(setting_render_displayResidual)
+		{
+			d_residual.Activate();
+			glColor4f(1.0f,1.0f,1.0f,1.0f);
+			texResidual.RenderToViewportFlipY();
+		} 
+
+	    // update parameters
+	    this->settings_pointCloudMode = settings_pointCloudMode.Get();
+
+	    this->settings_showActiveConstraints = settings_showActiveConstraints.Get();
+	    this->settings_showAllConstraints = settings_showAllConstraints.Get();
+	    this->settings_showCurrentCamera = settings_showCurrentCamera.Get();
+	    this->settings_showKFCameras = settings_showKFCameras.Get();
+	    this->settings_showTrajectory = settings_showTrajectory.Get();
+	    this->settings_showFullTrajectory = settings_showFullTrajectory.Get();
+
+		setting_render_display3D = settings_show3D.Get();
+		setting_render_displayDepth = settings_showLiveDepth.Get();
+		setting_render_displayVideo =  settings_showLiveVideo.Get();
+		setting_render_displayResidual = settings_showLiveResidual.Get();
+
+		setting_render_renderWindowFrames = settings_showFramesWindow.Get();
+		setting_render_plotTrackingFull = settings_showFullTracking.Get();
+		setting_render_displayCoarseTrackingFull = settings_showCoarseTracking.Get();
+
+
+	    this->settings_absVarTH = settings_absVarTH.Get();
+	    this->settings_scaledVarTH = settings_scaledVarTH.Get();
+	    this->settings_minRelBS = settings_minRelBS.Get();
+	    this->settings_sparsity = settings_sparsity.Get();
+
+	    setting_desiredPointDensity = settings_nPts.Get();
+	    setting_desiredImmatureDensity = settings_nCandidates.Get();
+	    setting_maxFrames = settings_nMaxFrames.Get();
+	    setting_kfGlobalWeight = settings_kfFrequency.Get();
+	    setting_minGradHistAdd = settings_gradHistAdd.Get();
+
+	    if(settings_resetButton.Get())
+	    {
+	    	printf("RESET!\n");
+	    	settings_resetButton.Reset();
+	    	setting_fullResetRequested = true;
+	    }
+
+		// Swap frames and Process Events
+		pangolin::FinishFrame();
+
+        if(needReset) reset_internal();
+    }
+	printf("QUIT Pangolin thread!\n");
+	printf("I'll just kill the whole process.\nSo Long, and Thanks for All the Fish!\n");
+
+	exit(1);
+}
+
+void PangolinDSOViewer::join()
+{
+	runThread.join();
+	printf("JOINED Pangolin thread!\n");
+}
+
+void PangolinDSOViewer::reset_internal()
+{
+	model3DMutex.lock();
+	for(size_t i=0; i<keyframes.size();i++) delete keyframes[i];
+	keyframes.clear();
+	allFramePoses.clear();
+	keyframesByKFID.clear();
+	connections.clear();
+	model3DMutex.unlock();
+
+
+	openImagesMutex.lock();
+	internalVideoImg->setBlack();
+	internalKFImg->setBlack();
+	internalResImg->setBlack();
+	videoImgChanged= kfImgChanged= resImgChanged=true;
+	openImagesMutex.unlock();
+
+	needReset = false;
+}
+
+void PangolinDSOViewer::drawConstraints()
+{
+    if(settings_showAllConstraints)
+    {
+        glLineWidth(1);
+        glBegin(GL_LINES);
+		glColor3f(0,1,0);
+		glBegin(GL_LINES);       
+		for(unsigned int i=0;i<connections.size();i++)
+		{
+			if(connections[i].to == 0 || connections[i].from==0) continue;
+			int nAct = connections[i].bwdAct + connections[i].fwdAct;
+			int nMarg = connections[i].bwdMarg + connections[i].fwdMarg;
+			if(nAct==0 && nMarg>0  )
+			{
+				Sophus::Vector3f t = connections[i].from->camToWorld.translation().cast<float>();
+				glVertex3f((GLfloat) t[0],(GLfloat) t[1], (GLfloat) t[2]);
+				t = connections[i].to->camToWorld.translation().cast<float>();
+				glVertex3f((GLfloat) t[0],(GLfloat) t[1], (GLfloat) t[2]);
+			}
+		}
+		glEnd();
+    }
+	if(settings_showActiveConstraints)
+	{
+		glLineWidth(3);
+		glColor3f(0,0,1);
+		glBegin(GL_LINES);
+		for(unsigned int i=0;i<connections.size();i++)
+		{
+			if(connections[i].to == 0 || connections[i].from==0) continue;
+			int nAct = connections[i].bwdAct + connections[i].fwdAct;
+
+			if(nAct>0)
+			{
+				Sophus::Vector3f t = connections[i].from->camToWorld.translation().cast<float>();
+				glVertex3f((GLfloat) t[0],(GLfloat) t[1], (GLfloat) t[2]);
+				t = connections[i].to->camToWorld.translation().cast<float>();
+				glVertex3f((GLfloat) t[0],(GLfloat) t[1], (GLfloat) t[2]);
+			}
+		}
+		glEnd();
+	}
+	if(settings_showTrajectory)
+	{
+		float colorRed[3] = {1,0,0};
+		glColor3f(colorRed[0],colorRed[1],colorRed[2]);
+		glLineWidth(3);
+
+		glBegin(GL_LINE_STRIP);
+		for(unsigned int i=0;i<keyframes.size();i++)
+		{
+			glVertex3f((float)keyframes[i]->camToWorld.translation()[0],
+					(float)keyframes[i]->camToWorld.translation()[1],
+					(float)keyframes[i]->camToWorld.translation()[2]);
+		}
+		glEnd();
+	}
+	if(settings_showFullTrajectory)
+	{
+		float colorGreen[3] = {0,1,0};
+		glColor3f(colorGreen[0],colorGreen[1],colorGreen[2]);
+		glLineWidth(3);
+
+		glBegin(GL_LINE_STRIP);
+		for(unsigned int i=0;i<allFramePoses.size();i++)
+		{
+			glVertex3f((float)allFramePoses[i][0],
+					(float)allFramePoses[i][1],
+					(float)allFramePoses[i][2]);
+		}
+		glEnd();
+	}
+}
+
+void PangolinDSOViewer::pushLiveFrame(FrameHessian* image)
+{
+	if(!setting_render_displayVideo) return;
+    if(disableAllDisplay) return;	
+	
+
+	boost::unique_lock<boost::mutex> lk(openImagesMutex);
+
+	for(int i=0;i<w*h;i++)
+	{
+		internalVideoImg->data[i][0] =
+		internalVideoImg->data[i][1] =
+		internalVideoImg->data[i][2] =
+			image->dI[i][0]*0.8 > 255.0f ? 255.0 : image->dI[i][0]*0.8;
+	}
+
+	videoImgChanged=true;	
+}
+
+
+}
