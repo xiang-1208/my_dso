@@ -1,5 +1,5 @@
 bin/my_dso \
-	files=/media/xiang/Xiang_P/tum/sequence_01/images.zip \
+	files=xiang/tum/sequence_01/images.zip \
 	calib=/media/xiang/Xiang_P/tum/sequence_01/camera.txt \
 	gamma=/media/xiang/Xiang_P/tum/sequence_01/pcalib.txt \
 	vignette=/media/xiang/Xiang_P/tum/sequence_01/vignette.png \
