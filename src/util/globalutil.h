@@ -48,6 +48,8 @@ namespace dso
 
     extern float setting_outlierTH;
 
+    extern float setting_huberTH;
+
     extern float setting_minGradHistAdd;
     extern float setting_minGradHistCut;
     extern float setting_gradDownweightPerLevel;

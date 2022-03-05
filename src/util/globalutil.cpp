@@ -70,6 +70,8 @@ namespace dso
 
 	bool preload=false;
 
+	float setting_huberTH = 9; // Huber Threshold
+
 	int sparsityFactor = 5;	// not actually a setting, only some legacy stuff for coarse initializer.
 
 	float benchmark_varNoise = 0;

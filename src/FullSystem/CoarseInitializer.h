@@ -4,6 +4,8 @@
 #include "FullSystem/PixelSelector2.h"
 #include "util/nanoflann.h"
 #include "IOWrapper/Output3DWrapper.h"
+#include "OptimizationBackend/MatrixAccumulators.h"
+#include "util/globalFuncs.h"
 
 using namespace dso;
 
@@ -20,14 +22,17 @@ public:
 	float idepth_new;			//!< 该点在新的一帧(当前帧)上的逆深度
 	float iR;					//!< 逆深度的期望值
 
-	float lastHessian;			//!< 逆深度的Hessian, 即协方差, dd*dd
-
 	bool isGood;				//!< 点在新图像内, 相机前, 像素值有穷则好
+	bool isGood_new;
 
 	Vec2f energy;				//!< [0]残差的平方, [1]正则化项(逆深度减一的平方)
+	Vec2f energy_new;			//!< 迭代计算的新的能量
 
 	float lastHessian;			//!< 逆深度的Hessian, 即协方差, dd*dd
 	float lastHessian_new;		//!< 新一次迭代的协方差
+
+	// max stepsize for idepth (corresponding to max. movement in pixel-space).
+	float maxstep;				//!< 逆深度增加的最大步长
 
 	float my_type; 				//!< 第0层提取是1, 2, 4, 对应d, 2d, 4d, 其它层是1
 	float outlierTH; 			//!< 外点阈值
@@ -95,6 +100,13 @@ protected:
 	int snappedAt;					//!< 尺度收敛在第几帧
 
 	Vec3f dGrads[PYR_LEVELS];
+
+	//* 9维向量, 乘积获得9*9矩阵, 并做的累加器
+	Accumulator9 acc9;			//!< Hessian 矩阵
+
+	// temporary buffers for H and b.
+	Vec10f* JbBuffer;			//!< 用来计算Schur的 0-7: sum(dd * dp). 8: sum(res*dd). 9: 1/(1+sum(dd*dd))=inverse hessian entry.
+	Vec10f* JbBuffer_new;		//!< 跌待更新后新的值
 };
 
 //* 作为 KDTreeSingleIndexAdaptor 类的第二个模板参数必须给出, 包括下面的接口

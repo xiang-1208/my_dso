@@ -4,20 +4,26 @@
 #include "sophus/se3.hpp"
 
 #define CPARS 4
+#define MAX_RES_PER_POINT 8
 
 typedef Sophus::SE3d SE3;
 
 #define MAX_RES_PER_POINT 8
 
 typedef Eigen::Matrix<double,Eigen::Dynamic,1> VecX;
+typedef Eigen::Matrix<float, MAX_RES_PER_POINT,1> VecNRf;
 typedef Eigen::Matrix<double,3,3> Mat33;
 typedef Eigen::Matrix<float,8,8> Mat88f;
+typedef Eigen::Matrix<float,3,3> Mat33f;
+typedef Eigen::Matrix<float,9,9> Mat99f;
 
+typedef Eigen::Matrix<float,9,1> Vec9f;
 typedef Eigen::Matrix<double,CPARS,1> VecC;
 typedef Eigen::Matrix<float,CPARS,1> VecCf;
 typedef Eigen::Matrix<float,3,1> Vec3f;
 typedef Eigen::Matrix<float,2,1> Vec2f;
 typedef Eigen::Matrix<float,8,1> Vec8f;
+typedef Eigen::Matrix<float,10,1> Vec10f;
 typedef Eigen::Matrix<unsigned char,3,1> Vec3b;
 
 struct AffLight

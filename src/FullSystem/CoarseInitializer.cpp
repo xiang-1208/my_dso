@@ -624,4 +624,124 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 	//! 旋转矩阵R * 内参矩阵K_inv
 	Mat33f RKi = (refToNew.rotationMatrix() * Ki[lvl]).cast<float>();	
+	Vec3f t = refToNew.translation().cast<float>(); // 平移
+	Eigen::Vector2f r2new_aff = Eigen::Vector2f(exp(refToNew_aff.a), refToNew_aff.b); // 光度参数
+
+	// 该层的相机参数
+	float fxl = fx[lvl];
+	float fyl = fy[lvl];
+	float cxl = cx[lvl];
+	float cyl = cy[lvl];
+
+
+	Accumulator11 E;  // 1*1 的累加器
+	acc9.initialize(); // 初始值, 分配空间
+	E.initialize();
+
+
+	int npts = numPoints[lvl];
+	Pnt* ptsl = points[lvl];
+	for(int i=0;i<npts;i++)
+	{
+
+		Pnt* point = ptsl+i;
+
+		point->maxstep = 1e10;
+		if(!point->isGood)  // 点不好
+		{
+			E.updateSingle((float)(point->energy[0])); // 累加
+			point->energy_new = point->energy;
+			point->isGood_new = false;
+			continue;
+		}
+
+        VecNRf dp0;  // 8*1矩阵, 每个点附近的残差个数为8个
+        VecNRf dp1;
+        VecNRf dp2;
+        VecNRf dp3;
+        VecNRf dp4;
+        VecNRf dp5;
+        VecNRf dp6;
+        VecNRf dp7;
+        VecNRf dd;
+        VecNRf r;
+		JbBuffer_new[i].setZero();  // 10*1 向量
+
+		// sum over all residuals.
+		bool isGood = true;
+		float energy=0;
+		for(int idx=0;idx<patternNum;idx++)
+		{
+			// pattern的坐标偏移
+			int dx = patternP[idx][0];
+			int dy = patternP[idx][1];
+
+			//! Pj' = R*(X/Z, Y/Z, 1) + t/Z, 变换到新的点, 深度仍然使用Host帧的!
+			Vec3f pt = RKi * Vec3f(point->u+dx, point->v+dy, 1) + t*point->idepth_new; 
+			// 归一化坐标 Pj
+			float u = pt[0] / pt[2];
+			float v = pt[1] / pt[2];
+			// 像素坐标pj
+			float Ku = fxl * u + cxl;
+			float Kv = fyl * v + cyl;
+			// dpi/pz' 
+			float new_idepth = point->idepth_new/pt[2]; // 新一帧上的逆深度
+
+			// 落在边缘附近，深度小于0, 则不好
+			if(!(Ku > 1 && Kv > 1 && Ku < wl-2 && Kv < hl-2 && new_idepth > 0))
+			{
+				isGood = false;
+				break;
+			}
+			// 插值得到新图像中的 patch 像素值，(输入3维，输出3维像素值 + x方向梯度 + y方向梯度)
+			Vec3f hitColor = getInterpolatedElement33(colorNew, Ku, Kv, wl);
+			//Vec3f hitColor = getInterpolatedElement33BiCub(colorNew, Ku, Kv, wl);
+
+			// 参考帧上的 patch 上的像素值, 输出一维像素值
+			//float rlR = colorRef[point->u+dx + (point->v+dy) * wl][0];
+			float rlR = getInterpolatedElement31(colorRef, point->u+dx, point->v+dy, wl);
+
+			// 像素值有穷, good
+			if(!std::isfinite(rlR) || !std::isfinite((float)hitColor[0]))
+			{
+				isGood = false;
+				break;
+			}
+
+			// 残差
+			float residual = hitColor[0] - r2new_aff[0] * rlR - r2new_aff[1];
+			// Huber权重
+			float hw = fabs(residual) < setting_huberTH ? 1 : setting_huberTH / fabs(residual); 
+			// huberweight * (2-huberweight) = Objective Function
+			// robust 权重和函数之间的关系
+			energy += hw *residual*residual*(2-hw);
+
+			// Pj 对 逆深度 di 求导   
+			//! 1/Pz * (tx - u*tz), u = px/pz 
+			float dxdd = (t[0]-t[2]*u)/pt[2];   
+			//! 1/Pz * (ty - v*tz), u = py/pz
+			float dydd = (t[1]-t[2]*v)/pt[2];
+
+			// 参考https://www.cnblogs.com/JingeTU/p/8203606.html
+			if(hw < 1) hw = sqrtf(hw); //?? 为啥开根号, 答: 鲁棒核函数等价于加权最小二乘
+			//! dxfx, dyfy
+			float dxInterp = hw*hitColor[1]*fxl;
+			float dyInterp = hw*hitColor[2]*fyl;
+			//* 残差对 j(新状态) 位姿求导, 
+			dp0[idx] = new_idepth*dxInterp; //! dpi/pz' * dxfx
+			dp1[idx] = new_idepth*dyInterp; //! dpi/pz' * dyfy
+			dp2[idx] = -new_idepth*(u*dxInterp + v*dyInterp); //! -dpi/pz' * (px'/pz'*dxfx + py'/pz'*dyfy)
+			dp3[idx] = -u*v*dxInterp - (1+v*v)*dyInterp; //! - px'py'/pz'^2*dxfy - (1+py'^2/pz'^2)*dyfy
+			dp4[idx] = (1+u*u)*dxInterp + u*v*dyInterp; //! (1+px'^2/pz'^2)*dxfx + px'py'/pz'^2*dxfy
+			dp5[idx] = -v*dxInterp + u*dyInterp; //! -py'/pz'*dxfx + px'/pz'*dyfy
+			//* 残差对光度参数求导
+			dp6[idx] = - hw*r2new_aff[0] * rlR; //! exp(aj-ai)*I(pi)
+			dp7[idx] = - hw*1;	//! 对 b 导
+			//* 残差对 i(旧状态) 逆深度求导
+			dd[idx] = dxInterp * dxdd  + dyInterp * dydd; 	//! dxfx * 1/Pz * (tx - u*tz) +　dyfy * 1/Pz * (tx - u*tz)			
+			r[idx] = hw*residual; //! 残差 res
+
+			
+		}
+	}
 }
