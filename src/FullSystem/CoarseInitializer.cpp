@@ -741,7 +741,67 @@ Vec3f CoarseInitializer::calcResAndGS(
 			dd[idx] = dxInterp * dxdd  + dyInterp * dydd; 	//! dxfx * 1/Pz * (tx - u*tz) +　dyfy * 1/Pz * (tx - u*tz)			
 			r[idx] = hw*residual; //! 残差 res
 
-			
+			//* 像素误差对逆深度的导数，取模倒数
+			float maxstep = 1.0f / Vec2f(dxdd*fxl, dydd*fyl).norm();  //? 为什么这么设置
+			if(maxstep < point->maxstep) point->maxstep = maxstep;
+
+			// immediately compute dp*dd' and dd*dd' in JbBuffer1.
+			//* 计算Hessian的第一行(列), 及Jr 关于逆深度那一行
+			// 用来计算舒尔补
+			JbBuffer_new[i][0] += dp0[idx]*dd[idx];
+			JbBuffer_new[i][1] += dp1[idx]*dd[idx];
+			JbBuffer_new[i][2] += dp2[idx]*dd[idx];
+			JbBuffer_new[i][3] += dp3[idx]*dd[idx];
+			JbBuffer_new[i][4] += dp4[idx]*dd[idx];
+			JbBuffer_new[i][5] += dp5[idx]*dd[idx];
+			JbBuffer_new[i][6] += dp6[idx]*dd[idx];
+			JbBuffer_new[i][7] += dp7[idx]*dd[idx];
+			JbBuffer_new[i][8] += r[idx]*dd[idx];
+			JbBuffer_new[i][9] += dd[idx]*dd[idx];						
 		}
+
+		// 如果点的pattern(其中一个像素)超出图像,像素值无穷, 或者残差大于阈值
+		if(!isGood || energy > point->outlierTH*20)
+		{
+			E.updateSingle((float)(point->energy[0])); // 上一帧的加进来
+			point->isGood_new = false;
+			point->energy_new = point->energy; //上一次的给当前次的
+			continue;
+		}
+
+		// 内点则加进能量函数
+		// add into energy.
+		E.updateSingle(energy);
+		point->isGood_new = true;
+		point->energy_new[0] = energy;
+
+		//! 因为使用128位相当于每次加4个数, 因此i+=4, 妙啊!
+		// update Hessian matrix.
+		for(int i=0;i+3<patternNum;i+=4)
+			acc9.updateSSE)
+				_mm_load_ps(((float*)(&dp0))+i),
+				_mm_load_ps(((float*)(&dp1))+i),
+				_mm_load_ps(((float*)(&dp2))+i),
+				_mm_load_ps(((float*)(&dp3))+i),
+				_mm_load_ps(((float*)(&dp4))+i),
+				_mm_load_ps(((float*)(&dp5))+i),
+				_mm_load_ps(((float*)(&dp6))+i),
+				_mm_load_ps(((float*)(&dp7))+i),
+				_mm_load_ps(((float*)(&r))+i));
+		
+		// 加0, 4, 8后面多余的值, 因为SSE2是以128为单位相加, 多余的单独加
+		for(int i=((patternNum>>2)<<2); i < patternNum; i++)
+			acc9.updateSingle(
+					(float)dp0[i],(float)dp1[i],(float)dp2[i],(float)dp3[i],
+					(float)dp4[i],(float)dp5[i],(float)dp6[i],(float)dp7[i],
+					(float)r[i]);		
 	}
+
+	E.finish();
+	acc9.finish();
+
+
+	// calculate alpha energy, and decide if we cap it.
+	Accumulator11 EAlpha;
+
 }
