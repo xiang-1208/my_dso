@@ -17,6 +17,8 @@ typedef Eigen::Matrix<float,8,8> Mat88f;
 typedef Eigen::Matrix<float,3,3> Mat33f;
 typedef Eigen::Matrix<float,9,9> Mat99f;
 
+
+typedef Eigen::Matrix<double,2,1> Vec2;
 typedef Eigen::Matrix<float,9,1> Vec9f;
 typedef Eigen::Matrix<double,CPARS,1> VecC;
 typedef Eigen::Matrix<float,CPARS,1> VecCf;
@@ -32,4 +34,9 @@ struct AffLight
 	AffLight() : a(0), b(0) {};    
 
     double a,b; // I_frame = exp(a)*I_global + b. // I_global = exp(-a)*(I_frame - b).
+
+	Vec2 vec()
+	{
+		return Vec2(a,b);
+	}
 };

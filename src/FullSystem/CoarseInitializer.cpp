@@ -235,7 +235,11 @@ CoarseInitializer::CoarseInitializer(int ww, int hh):thisToNext_aff(0,0),thisToN
 		numPoints[lvl] = 0;        
     }
 
+	JbBuffer = new Vec10f[ww*hh];
+	JbBuffer_new = new Vec10f[ww*hh];
+
     frameID=-1;
+	printDebug=false;
 }
 
 void CoarseInitializer::setFirst(CalibHessian* HCalib, FrameHessian* newFrameHessian)
@@ -442,7 +446,6 @@ void CoarseInitializer::makeNN()
 bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IOWrap::Output3DWrapper*> &wraps)
 {
 	newFrame = newFrameHessian;
-	std::cout<<"!!!!!!"<<std::endl;
 	//[ ***step 1*** ] 先显示新来的帧
 	// 新的一帧, 在跟踪之前显示的
 	for(IOWrap::Output3DWrapper* ow : wraps)
@@ -494,10 +497,50 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 		resetPoints(lvl); //这里对顶层进行初始化！
 		//[ ***step 4*** ] 迭代之前计算能量, Hessian等
 		Vec3f resOld = calcResAndGS(lvl, H, b, Hsc, bsc, refToNew_current, refToNew_aff_current, false);
+		applyStep(lvl); // 新的能量付给旧的
 
+		float lambda = 0.1;
+		float eps = 1e-4;
+		int fails=0;
+		// 初始信息
+		if(printDebug)
+		{
+			printf("lvl %d, it %d (l=%f) %s: %.3f+%.5f -> %.3f+%.5f (%.3f->%.3f) (|inc| = %f)! \t",
+					lvl, 0, lambda,
+					"INITIA",
+					sqrtf((float)(resOld[0] / resOld[2])), // 卡方(res*res)平均值
+					sqrtf((float)(resOld[1] / resOld[2])), // 逆深度能量平均值
+					sqrtf((float)(resOld[0] / resOld[2])),
+					sqrtf((float)(resOld[1] / resOld[2])),
+					(resOld[0]+resOld[1]) / resOld[2],
+					(resOld[0]+resOld[1]) / resOld[2],
+					0.0f);
+			std::cout << refToNew_current.log().transpose() << " AFF " << refToNew_aff_current.vec().transpose() <<"\n";
+		}
 	}
 
+
 	return true;
+}
+
+//* 新的值赋值给旧的 (能量, 点状态, 逆深度, hessian)
+void CoarseInitializer::applyStep(int lvl)
+{
+	Pnt* pts = points[lvl];
+	int npts = numPoints[lvl];
+	for(int i=0;i<npts;i++)
+	{
+		if(!pts[i].isGood)
+		{
+			pts[i].idepth = pts[i].idepth_new = pts[i].iR;
+			continue;
+		}
+		pts[i].energy = pts[i].energy_new;
+		pts[i].isGood = pts[i].isGood_new;
+		pts[i].idepth = pts[i].idepth_new;
+		pts[i].lastHessian = pts[i].lastHessian_new;
+	}
+	std::swap<Vec10f*>(JbBuffer, JbBuffer_new);
 }
 
 //@ 使用上层信息来初始化下层
@@ -638,7 +681,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 	acc9.initialize(); // 初始值, 分配空间
 	E.initialize();
 
-
+	
 	int npts = numPoints[lvl];
 	Pnt* ptsl = points[lvl];
 	for(int i=0;i<npts;i++)
@@ -778,7 +821,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 		//! 因为使用128位相当于每次加4个数, 因此i+=4, 妙啊!
 		// update Hessian matrix.
 		for(int i=0;i+3<patternNum;i+=4)
-			acc9.updateSSE)
+			acc9.updateSSE(
 				_mm_load_ps(((float*)(&dp0))+i),
 				_mm_load_ps(((float*)(&dp1))+i),
 				_mm_load_ps(((float*)(&dp2))+i),
@@ -797,11 +840,92 @@ Vec3f CoarseInitializer::calcResAndGS(
 					(float)r[i]);		
 	}
 
+
 	E.finish();
 	acc9.finish();
 
 
 	// calculate alpha energy, and decide if we cap it.
 	Accumulator11 EAlpha;
+	EAlpha.initialize();
+	for(int i=0;i<npts;i++)
+	{
+		Pnt* point = ptsl+i;
+		if(!point->isGood_new) // 点不好用之前的
+		{
+			E.updateSingle((float)(point->energy[1])); //! 又是故意这样写的，没用的代码
+		}
+		else
+		{
+			// 最开始初始化都是成1
+			point->energy_new[1] = (point->idepth_new-1)*(point->idepth_new-1);  //? 什么原理?
+			E.updateSingle((float)(point->energy_new[1])); 
+		}
+	}
+	EAlpha.finish(); //! 只是计算位移是否足够大
+	float alphaEnergy = alphaW*(EAlpha.A + refToNew.translation().squaredNorm() * npts); // 平移越大, 越容易初始化成功?
 
+	//printf("AE = %f * %f + %f\n", alphaW, EAlpha.A, refToNew.translation().squaredNorm() * npts);
+
+	// compute alpha opt.
+	float alphaOpt;
+	if(alphaEnergy > alphaK*npts) // 平移大于一定值
+	{
+		alphaOpt = 0;
+		alphaEnergy = alphaK*npts;
+	}
+	else
+	{
+		alphaOpt = alphaW;
+	}
+
+	acc9SC.initialize();
+	for(int i=0;i<npts;i++)
+	{
+		Pnt* point = ptsl+i;
+		if(!point->isGood_new)
+			continue;
+
+		point->lastHessian_new = JbBuffer_new[i][9]; // 对逆深度 dd*dd
+		//? 这又是啥??? 对逆深度的值进行加权? 深度值归一化?
+		// 前面Energe加上了（d-1)*(d-1), 所以dd = 1， r += (d-1)
+		JbBuffer_new[i][8] += alphaOpt*(point->idepth_new - 1); // r*dd
+		JbBuffer_new[i][9] += alphaOpt; // 对逆深度导数为1 // dd*dd
+
+		if(alphaOpt==0)
+		{
+			JbBuffer_new[i][8] += couplingWeight*(point->idepth_new - point->iR);
+			JbBuffer_new[i][9] += couplingWeight;
+		}
+
+		JbBuffer_new[i][9] = 1/(1+JbBuffer_new[i][9]);  // 取逆是协方差，做权重
+		//* 9做权重, 计算的是舒尔补项!
+		//! dp*dd*(dd^2)^-1*dd*dp
+		acc9SC.updateSingleWeighted(
+				(float)JbBuffer_new[i][0],(float)JbBuffer_new[i][1],(float)JbBuffer_new[i][2],(float)JbBuffer_new[i][3],
+				(float)JbBuffer_new[i][4],(float)JbBuffer_new[i][5],(float)JbBuffer_new[i][6],(float)JbBuffer_new[i][7],
+				(float)JbBuffer_new[i][8],(float)JbBuffer_new[i][9]);
+	}
+	acc9SC.finish();	
+
+	//printf("nelements in H: %d, in E: %d, in Hsc: %d / 9!\n", (int)acc9.num, (int)E.num, (int)acc9SC.num*9);
+	H_out = acc9.H.topLeftCorner<8,8>();// / acc9.num;  		!dp^T*dp
+	b_out = acc9.H.topRightCorner<8,1>();// / acc9.num; 		!dp^T*r 
+	H_out_sc = acc9SC.H.topLeftCorner<8,8>();// / acc9.num; 	!(dp*dd)^T*(dd*dd)^-1*(dd*dp)
+	b_out_sc = acc9SC.H.topRightCorner<8,1>();// / acc9.num;	!(dp*dd)^T*(dd*dd)^-1*(dp^T*r)
+
+	//??? 啥意思
+	// t*t*ntps
+	// 给 t 对应的Hessian, 对角线加上一个数, b也加上
+	H_out(0,0) += alphaOpt*npts;
+	H_out(1,1) += alphaOpt*npts;
+	H_out(2,2) += alphaOpt*npts;
+
+	Vec3f tlog = refToNew.log().head<3>().cast<float>(); // 李代数, 平移部分 (上一次的位姿值)
+	b_out[0] += tlog[0]*alphaOpt*npts;
+	b_out[1] += tlog[1]*alphaOpt*npts;
+	b_out[2] += tlog[2]*alphaOpt*npts;
+
+	// 能量值, ? , 使用的点的个数
+	return Vec3f(E.A, alphaEnergy ,E.num);	
 }

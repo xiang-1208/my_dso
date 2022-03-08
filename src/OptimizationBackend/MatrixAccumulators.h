@@ -223,6 +223,82 @@ public:
 	    shiftUp(false);
     }
 
+	// 不使用对齐加速的, 带有权重的
+  	inline void updateSingleWeighted(
+		float J0, float J1,
+		float J2, float J3,
+		float J4, float J5,
+		float J6, float J7,
+		float J8, float w,
+		int off=0)
+  	{
+	  	float* pt=SSEData+off;
+	  	*pt += J0*J0*w; pt+=4; J0*=w;
+	  	*pt += J1*J0; pt+=4;
+	  	*pt += J2*J0; pt+=4;
+	  	*pt += J3*J0; pt+=4;
+	  	*pt += J4*J0; pt+=4;
+	  	*pt += J5*J0; pt+=4;
+	  	*pt += J6*J0; pt+=4;
+	  	*pt += J7*J0; pt+=4;
+	  	*pt += J8*J0; pt+=4;
+	
+	
+	  	*pt += J1*J1*w; pt+=4; J1*=w;
+	  	*pt += J2*J1; pt+=4;
+	  	*pt += J3*J1; pt+=4;
+	  	*pt += J4*J1; pt+=4;
+	  	*pt += J5*J1; pt+=4;
+	  	*pt += J6*J1; pt+=4;
+	  	*pt += J7*J1; pt+=4;
+	  	*pt += J8*J1; pt+=4;
+	
+	
+	  	*pt += J2*J2*w; pt+=4; J2*=w;
+	  	*pt += J3*J2; pt+=4;
+	  	*pt += J4*J2; pt+=4;
+	  	*pt += J5*J2; pt+=4;
+	  	*pt += J6*J2; pt+=4;
+	  	*pt += J7*J2; pt+=4;
+	  	*pt += J8*J2; pt+=4;
+	
+	
+	  	*pt += J3*J3*w; pt+=4; J3*=w;
+	  	*pt += J4*J3; pt+=4;
+	  	*pt += J5*J3; pt+=4;
+	  	*pt += J6*J3; pt+=4;
+	  	*pt += J7*J3; pt+=4;
+	  	*pt += J8*J3; pt+=4;
+	
+	
+	  	*pt += J4*J4*w; pt+=4; J4*=w;
+	  	*pt += J5*J4; pt+=4;
+	  	*pt += J6*J4; pt+=4;
+	  	*pt += J7*J4; pt+=4;
+	  	*pt += J8*J4; pt+=4;
+	
+	  	*pt += J5*J5*w; pt+=4; J5*=w;
+	  	*pt += J6*J5; pt+=4;
+	  	*pt += J7*J5; pt+=4;
+	  	*pt += J8*J5; pt+=4;
+	
+	
+	  	*pt += J6*J6*w; pt+=4; J6*=w;
+	  	*pt += J7*J6; pt+=4;
+	  	*pt += J8*J6; pt+=4;
+	
+	
+	  	*pt += J7*J7*w; pt+=4; J7*=w;
+	  	*pt += J8*J7; pt+=4;
+	
+	  	*pt += J8*J8*w; pt+=4;
+	
+	  	num++;
+	  	numIn1++;
+	  	shiftUp(false);
+  	}
+
+
     inline void finish()
     {
 	    H.setZero();

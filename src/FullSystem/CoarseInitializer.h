@@ -6,6 +6,7 @@
 #include "IOWrapper/Output3DWrapper.h"
 #include "OptimizationBackend/MatrixAccumulators.h"
 #include "util/globalFuncs.h"
+#include "vector"
 
 using namespace dso;
 
@@ -61,6 +62,7 @@ public:
 	SE3 thisToNext;
 
     int frameID;
+	bool printDebug;
 
 protected:
     void makeK(CalibHessian* HCalib);
@@ -73,6 +75,7 @@ protected:
 		Mat88f &H_out_sc, Vec8f &b_out_sc,
 		const SE3 &refToNew, AffLight refToNew_aff,
 		bool plot);
+	void applyStep(int lvl);
 
 	Mat33 K[PYR_LEVELS];
 	Mat33 Ki[PYR_LEVELS];
@@ -103,6 +106,7 @@ protected:
 
 	//* 9维向量, 乘积获得9*9矩阵, 并做的累加器
 	Accumulator9 acc9;			//!< Hessian 矩阵
+	Accumulator9 acc9SC;		//!< Schur部分Hessian
 
 	// temporary buffers for H and b.
 	Vec10f* JbBuffer;			//!< 用来计算Schur的 0-7: sum(dd * dp). 8: sum(res*dd). 9: 1/(1+sum(dd*dd))=inverse hessian entry.
