@@ -239,7 +239,13 @@ CoarseInitializer::CoarseInitializer(int ww, int hh):thisToNext_aff(0,0),thisToN
 	JbBuffer_new = new Vec10f[ww*hh];
 
     frameID=-1;
+	fixAffine=true;
 	printDebug=false;
+
+	wM.diagonal()[0] = wM.diagonal()[1] = wM.diagonal()[2] = SCALE_XI_ROT;
+	wM.diagonal()[3] = wM.diagonal()[4] = wM.diagonal()[5] = SCALE_XI_TRANS;
+	wM.diagonal()[6] = SCALE_A;
+	wM.diagonal()[7] = SCALE_B;
 }
 
 void CoarseInitializer::setFirst(CalibHessian* HCalib, FrameHessian* newFrameHessian)
@@ -517,11 +523,104 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 					0.0f);
 			std::cout << refToNew_current.log().transpose() << " AFF " << refToNew_aff_current.vec().transpose() <<"\n";
 		}
+
+		//[ ***step 5*** ] 迭代求解
+		int iteration=0;		
+		while(true)
+		{
+			//[ ***step 5.1*** ] 计算边缘化后的Hessian矩阵, 以及一些骚操作
+			Mat88f Hl = H;	
+			for(int i=0;i<8;i++) Hl(i,i) *= (1+lambda);
+			// 舒尔补, 边缘化掉逆深度状态
+			Hl -= Hsc*(1/(1+lambda)); // 因为dd必定是对角线上的, 所以也乘倒数
+			Vec8f bl = b - bsc*(1/(1+lambda));
+			//? wM为什么这么乘, 它对应着状态的SCALE
+			//? (0.01f/(w[lvl]*h[lvl]))是为了减小数值, 更稳定?
+			Hl = wM * Hl * wM * (0.01f/(w[lvl]*h[lvl]));
+			bl = wM * bl * (0.01f/(w[lvl]*h[lvl]));	
+
+			//[ ***step 5.2*** ] 求解增量	
+			Vec8f inc;
+			if(fixAffine) // 固定光度参数
+			{
+				inc.head<6>() = - (wM.toDenseMatrix().topLeftCorner<6,6>() * (Hl.topLeftCorner<6,6>().ldlt().solve(bl.head<6>())));
+				inc.tail<2>().setZero();
+			}
+			else
+				inc = - (wM * (Hl.ldlt().solve(bl)));
+
+			//[ ***step 5.3*** ] 更新状态, doStep中更新逆深度
+			SE3 refToNew_new = SE3::exp(inc.head<6>().cast<double>()) * refToNew_current;
+			AffLight refToNew_aff_new = refToNew_aff_current;
+			refToNew_aff_new.a += inc[6];
+			refToNew_aff_new.b += inc[7];
+			doStep(lvl, lambda, inc);		
+
+			//[ ***step 5.4*** ] 计算更新后的能量并且与旧的对比判断是否accept
+			Mat88f H_new, Hsc_new; Vec8f b_new, bsc_new;
+			Vec3f resNew = calcResAndGS(lvl, H_new, b_new, Hsc_new, bsc_new, refToNew_new, refToNew_aff_new, false);	
+			Vec3f regEnergy = calcEC(lvl);
+
+		}
 	}
 
 
 	return true;
 }
+
+//* 计算旧的和新的逆深度与iR的差值, 返回旧的差, 新的差, 数目
+//? iR到底是啥呢     答：IR是逆深度的均值，尺度收敛到IR
+Vec3f CoarseInitializer::calcEC(int lvl)
+{
+	if(!snapped) return Vec3f(0,0,numPoints[lvl]);
+	AccumulatorX<2> E;
+	E.initialize();
+	int npts = numPoints[lvl];
+	for(int i=0;i<npts;i++)
+	{
+		Pnt* point = points[lvl]+i;
+		if(!point->isGood_new) continue;
+		float rOld = (point->idepth-point->iR);
+		float rNew = (point->idepth_new-point->iR);	
+		E.updateNoWeight(Vec2f(rOld*rOld,rNew*rNew)); // 求和	
+	}
+	E.finish();
+
+	return Vec3f(couplingWeight*E.A1m[0], couplingWeight*E.A1m[1], E.num);
+}
+
+
+void CoarseInitializer::doStep(int lvl, float lambda, Vec8f inc)
+{
+	const float maxPixelStep = 0.25;
+	const float idMaxStep = 1e10;
+	Pnt* pts = points[lvl];
+	int npts = numPoints[lvl];
+	for(int i=0;i<npts;i++)
+	{
+		if(!pts[i].isGood) continue;
+
+		//! dd*r + (dp*dd)^T*delta_p 
+		float b = JbBuffer[i][8] + JbBuffer[i].head<8>().dot(inc);
+		//! dd * delta_d = dd*r - (dp*dd)^T*delta_p = b 
+		//! delta_d = b * dd^-1
+		float step = - b * JbBuffer[i][9] / (1+lambda);
+
+
+		float maxstep = maxPixelStep*pts[i].maxstep; // 逆深度最大只能增加这些
+		if(maxstep > idMaxStep) maxstep=idMaxStep;
+
+		if(step >  maxstep) step = maxstep;
+		if(step < -maxstep) step = -maxstep;
+
+		// 更新得到新的逆深度
+		float newIdepth = pts[i].idepth + step;
+		if(newIdepth < 1e-3 ) newIdepth = 1e-3;
+		if(newIdepth > 50) newIdepth = 50;
+		pts[i].idepth_new = newIdepth;		
+	}
+}
+
 
 //* 新的值赋值给旧的 (能量, 点状态, 逆深度, hessian)
 void CoarseInitializer::applyStep(int lvl)
@@ -720,7 +819,10 @@ Vec3f CoarseInitializer::calcResAndGS(
 			int dy = patternP[idx][1];
 
 			//! Pj' = R*(X/Z, Y/Z, 1) + t/Z, 变换到新的点, 深度仍然使用Host帧的!
+			//???
+			//std::cout << "point->idepth_new: " << point->idepth_new << std::endl;
 			Vec3f pt = RKi * Vec3f(point->u+dx, point->v+dy, 1) + t*point->idepth_new; 
+			// std::cout << "pt[2]: " << pt[2] << std::endl;
 			// 归一化坐标 Pj
 			float u = pt[0] / pt[2];
 			float v = pt[1] / pt[2];
@@ -785,6 +887,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			r[idx] = hw*residual; //! 残差 res
 
 			//* 像素误差对逆深度的导数，取模倒数
+			//?????
 			float maxstep = 1.0f / Vec2f(dxdd*fxl, dydd*fyl).norm();  //? 为什么这么设置
 			if(maxstep < point->maxstep) point->maxstep = maxstep;
 

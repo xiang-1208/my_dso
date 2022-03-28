@@ -62,6 +62,7 @@ public:
 	SE3 thisToNext;
 
     int frameID;
+	bool fixAffine;					//!< 是否优化光度参数
 	bool printDebug;
 
 protected:
@@ -76,6 +77,8 @@ protected:
 		const SE3 &refToNew, AffLight refToNew_aff,
 		bool plot);
 	void applyStep(int lvl);
+	void doStep(int lvl, float lambda, Vec8f inc);
+	Vec3f calcEC(int lvl);
 
 	Mat33 K[PYR_LEVELS];
 	Mat33 Ki[PYR_LEVELS];
@@ -103,6 +106,8 @@ protected:
 	int snappedAt;					//!< 尺度收敛在第几帧
 
 	Vec3f dGrads[PYR_LEVELS];
+
+	Eigen::DiagonalMatrix<float, 8> wM;
 
 	//* 9维向量, 乘积获得9*9矩阵, 并做的累加器
 	Accumulator9 acc9;			//!< Hessian 矩阵
