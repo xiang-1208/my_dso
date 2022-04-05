@@ -7,6 +7,7 @@
 #include "boost/thread.hpp"
 #include "util/ImageAndExposure.h"
 #include "FullSystem/CoarseInitializer.h"
+#include "OptimizationBackend/EnergyFunctional.h"
 
 using namespace dso;
 
@@ -16,6 +17,7 @@ public:
 	FullSystem();
 
 	void setGammaFunction(float* BInv);
+	void setPrecalcValues();
 	void addActiveFrame( ImageAndExposure* image, int id );
 
 	bool linearizeOperation;
@@ -24,7 +26,13 @@ public:
 	std::vector<IOWrap::Output3DWrapper*> outputWrapper;
 
 protected:
+	void initializeFromInitializer(FrameHessian* fh);
+
+	EnergyFunctional* ef;			//!< 能量方程
+
 	boost::mutex trackMutex;
+
+	boost::mutex mapMutex;
 
 	CalibHessian Hcalib;
 
@@ -44,5 +52,10 @@ protected:
 
 	std::vector<FrameShell*> allFrameHistory;
 	CoarseInitializer* coarseInitializer;
+
+	std::vector<FrameShell*> allKeyFramesHistory;
+	std::vector<FrameHessian*> frameHessians;	//!< 关键帧 // ONLY changed in marginalizeFrame and addFrame.
+
+	
 	
 };

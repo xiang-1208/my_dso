@@ -66,6 +66,8 @@ FullSystem::FullSystem()
 
     coarseInitializer = new CoarseInitializer(wG[0], hG[0]);
 
+    ef = new EnergyFunctional();
+
     //selectionMap = new float[wG[0]*hG[0]];
     initialized=false;
     isLost=false;
@@ -127,10 +129,37 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
         }
         else if (coarseInitializer->trackFrame(fh, outputWrapper)) // if SNAPPED
         {
+            std::cout << "初始化完成" <<std::endl;
+            initializeFromInitializer(fh);
             lock.unlock();
         }
     }
     else
     {
+    }
+}
+
+//@ 从初始化中提取出信息, 用于跟踪.
+void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
+{
+    boost::unique_lock<boost::mutex> lock(mapMutex);
+
+    //[ ***step 1*** ] 把第一帧设置成关键帧, 加入队列, 加入EnergyFunctional
+    FrameHessian* firstFrame = coarseInitializer->firstFrame;  // 第一帧增加进地图
+	firstFrame->idx = frameHessians.size(); // 赋值给它id (0开始)
+	frameHessians.push_back(firstFrame);  	// 地图内关键帧容器    
+	firstFrame->frameID = allKeyFramesHistory.size();  	// 所有历史关键帧id
+	allKeyFramesHistory.push_back(firstFrame->shell); 	// 所有历史关键帧
+    ef->insertFrame(firstFrame, &Hcalib);
+    setPrecalcValues();   		// 设置相对位姿预计算值
+}
+
+//* 计算frameHessian的预计算值, 和状态的delta值
+//@ 设置关键帧之间的关系
+void FullSystem::setPrecalcValues()
+{
+    for(FrameHessian* fh : frameHessians)
+    {
+        fh->targetPrecalc.resize(frameHessians.size());
     }
 }

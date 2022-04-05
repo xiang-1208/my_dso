@@ -41,6 +41,13 @@ namespace dso
 	bool  setting_selectDirectionDistribution = true;
 	int setting_gammaWeightsPixelSelect = 1; // 1 = use original intensity for pixel selection; 0 = use gamma-corrected intensity.
 
+	float setting_idepthFixPrior = 50*50;
+	float setting_idepthFixPriorMargFac = 600*600;
+	float setting_initialRotPrior = 1e11;
+	float setting_initialTransPrior = 1e10;
+	float setting_initialAffBPrior = 1e14;
+	float setting_initialAffAPrior = 1e14;
+	float setting_initialCalibHessian = 5e9;
 
     float playbackSpeed=0;	// 0 for linearize (play as fast as possible, while sequentializing tracking & mapping). otherwise, factor on timestamps.
     bool disableAllDisplay = false;

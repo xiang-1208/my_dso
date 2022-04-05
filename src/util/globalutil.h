@@ -35,7 +35,15 @@ namespace dso
     extern int end; 
  
     extern bool reverse;
-    extern bool setting_logStuff;   
+    extern bool setting_logStuff; 
+
+	extern float setting_idepthFixPrior;
+	extern float setting_idepthFixPriorMargFac;
+	extern float setting_initialRotPrior;
+	extern float setting_initialTransPrior;
+	extern float setting_initialAffBPrior;
+	extern float setting_initialAffAPrior;
+	extern float setting_initialCalibHessian;  
 
     extern int setting_photometricCalibration ;
     extern float setting_affineOptModeA; //-1: fix. >=0: optimize (with prior, if > 0).

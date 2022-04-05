@@ -22,6 +22,8 @@ public:
 	float idepth;				//!< 该点对应参考帧的逆深度
 	float idepth_new;			//!< 该点在新的一帧(当前帧)上的逆深度
 	float iR;					//!< 逆深度的期望值
+	float iRSumNum;				//!< 子点逆深度信息矩阵之和
+
 
 	bool isGood;				//!< 点在新图像内, 相机前, 像素值有穷则好
 	bool isGood_new;
@@ -65,10 +67,14 @@ public:
 	bool fixAffine;					//!< 是否优化光度参数
 	bool printDebug;
 
+    FrameHessian* firstFrame;
+	FrameHessian* newFrame;			//!< track中新加入的帧
+
 protected:
     void makeK(CalibHessian* HCalib);
 	void makeNN();
 	void propagateDown(int srcLvl);
+	void propagateUp(int srcLvl);
 	void optReg(int lvl);
 	void resetPoints(int lvl);
 	Vec3f calcResAndGS(
@@ -99,8 +105,7 @@ protected:
 	float regWeight;				//!< 对逆深度的加权值, 0.8
 	float couplingWeight;			//!< 1
 
-    FrameHessian* firstFrame;
-	FrameHessian* newFrame;			//!< track中新加入的帧
+
     
 	bool snapped;					//!< 是否尺度收敛 (暂定)
 	int snappedAt;					//!< 尺度收敛在第几帧

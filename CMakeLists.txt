@@ -107,7 +107,9 @@ add_library(my_lib src/util/DatasetReader.cpp /
                     src/FullSystem/HessianBlocks.cpp
                     src/FullSystem/CoarseInitializer.cpp
                     src/FullSystem/PixelSelector2.cpp
-                    src/FullSystem/FullSystem.cpp)
+                    src/FullSystem/FullSystem.cpp
+                    src/OptimizationBackend/EnergyFunctional.cpp
+                    src/OptimizationBackend/EnergyFunctionalStructs.cpp)
 add_executable(my_dso src/main.cpp )
 target_link_libraries(my_dso my_lib)
 target_link_libraries(my_dso boost_thread )

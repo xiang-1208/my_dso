@@ -561,11 +561,88 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 			Vec3f resNew = calcResAndGS(lvl, H_new, b_new, Hsc_new, bsc_new, refToNew_new, refToNew_aff_new, false);	
 			Vec3f regEnergy = calcEC(lvl);
 
+			float eTotalNew = (resNew[0]+resNew[1]+regEnergy[1]);
+			float eTotalOld = (resOld[0]+resOld[1]+regEnergy[0]);
+
+			bool accept = eTotalOld > eTotalNew;
+
+			if(printDebug)
+			{
+				printf("lvl %d, it %d (l=%f) %s: %.5f + %.5f + %.5f -> %.5f + %.5f + %.5f (%.2f->%.2f) (|inc| = %f)! \t",
+						lvl, iteration, lambda,
+						(accept ? "ACCEPT" : "REJECT"),
+						sqrtf((float)(resOld[0] / resOld[2])),
+						sqrtf((float)(regEnergy[0] / regEnergy[2])),
+						sqrtf((float)(resOld[1] / resOld[2])),
+						sqrtf((float)(resNew[0] / resNew[2])),
+						sqrtf((float)(regEnergy[1] / regEnergy[2])),
+						sqrtf((float)(resNew[1] / resNew[2])),
+						eTotalOld / resNew[2],
+						eTotalNew / resNew[2],
+						inc.norm());
+				std::cout << refToNew_new.log().transpose() << " AFF " << refToNew_aff_new.vec().transpose() <<"\n";
+			}
+
+			//[ ***step 5.5*** ] 接受的话, 更新状态,; 不接受则增大lambda
+			if(accept)
+			{
+				if(resNew[1] == alphaK*numPoints[lvl]) // 当 alphaEnergy > alphaK*npts
+					snapped = true;
+				H = H_new;
+				b = b_new;
+				Hsc = Hsc_new;
+				bsc = bsc_new;
+				resOld = resNew;
+				refToNew_aff_current = refToNew_aff_new;
+				refToNew_current = refToNew_new;
+				applyStep(lvl);
+				optReg(lvl); // 更新iR
+				lambda *= 0.5;
+				fails=0;
+				if(lambda < 0.0001) lambda = 0.0001;												
+			}
+			else
+			{
+				fails++;
+				lambda *= 4;
+				if(lambda > 10000) lambda = 10000;				
+			}
+			bool quitOpt = false;
+			// 迭代停止条件, 收敛/大于最大次数/失败2次以上
+			if(!(inc.norm() > eps) || iteration >= maxIterations[lvl] || fails >= 2)
+			{
+				Mat88f H,Hsc; Vec8f b,bsc;
+
+				quitOpt = true;
+			}
+			if(quitOpt) break;
+			iteration++;
 		}
+		latestRes = resOld;
 	}
 
+//[ ***step 6*** ] 优化后赋值位姿, 从底层计算上层点的深度
+	thisToNext = refToNew_current;
+	thisToNext_aff = refToNew_aff_current;
 
-	return true;
+	for(int i=0;i<pyrLevelsUsed-1;i++)
+		propagateUp(i);
+
+
+	frameID++;
+	if(!snapped) snappedAt=0; 
+
+	if(snapped && snappedAt==0)
+		snappedAt = frameID;  // 位移足够的帧数
+
+
+	//显示点
+    //debugPlot(0,wraps);
+
+
+	// 位移足够大, 再优化5帧才行
+	std::cout << "snapped at " << snappedAt << std::endl;
+	return snapped && frameID > snappedAt+5;
 }
 
 //* 计算旧的和新的逆深度与iR的差值, 返回旧的差, 新的差, 数目
@@ -641,6 +718,51 @@ void CoarseInitializer::applyStep(int lvl)
 	}
 	std::swap<Vec10f*>(JbBuffer, JbBuffer_new);
 }
+
+//* 使用归一化积来更新高层逆深度值
+//@ 使用下层信息来初始化上层
+void CoarseInitializer::propagateUp(int srcLvl)
+{
+	assert(srcLvl+1<pyrLevelsUsed);
+	// set idepth of target
+
+	int nptss= numPoints[srcLvl];
+	int nptst= numPoints[srcLvl+1];
+	Pnt* ptss = points[srcLvl];
+	Pnt* ptst = points[srcLvl+1];
+
+	// set to zero.
+	for(int i=0;i<nptst;i++)
+	{
+		Pnt* parent = ptst+i;
+		parent->iR=0;
+		parent->iRSumNum=0;
+	}
+	//* 更新在上一层的parent
+	for(int i=0;i<nptss;i++)
+	{
+		Pnt* point = ptss+i;
+		if(!point->isGood) continue;
+
+		Pnt* parent = ptst + point->parent;
+		parent->iR += point->iR * point->lastHessian; //! 均值*信息矩阵 ∑ (sigma*u)
+		parent->iRSumNum += point->lastHessian;  //! 新的信息矩阵 ∑ sigma
+	}
+
+	for(int i=0;i<nptst;i++)
+	{
+		Pnt* parent = ptst+i;
+		if(parent->iRSumNum > 0)
+		{
+			parent->idepth = parent->iR = (parent->iR / parent->iRSumNum); //! 高斯归一化积后的均值
+			parent->isGood = true;
+		}
+	}
+
+	optReg(srcLvl+1); // 使用附近的点来更新IR和逆深度
+}
+
+
 
 //@ 使用上层信息来初始化下层
 //@ param: 当前的金字塔层+1

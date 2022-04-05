@@ -1,4 +1,5 @@
 #include "HessianBlocks.h"
+#include "OptimizationBackend/EnergyFunctionalStructs.h"
 
 void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 {
