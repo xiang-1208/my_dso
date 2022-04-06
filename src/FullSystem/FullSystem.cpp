@@ -152,6 +152,48 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	allKeyFramesHistory.push_back(firstFrame->shell); 	// 所有历史关键帧
     ef->insertFrame(firstFrame, &Hcalib);
     setPrecalcValues();   		// 设置相对位姿预计算值
+
+	//int numPointsTotal = makePixelStatus(firstFrame->dI, selectionMap, wG[0], hG[0], setting_desiredDensity);
+	//int numPointsTotal = pixelSelector->makeMaps(firstFrame->dIp, selectionMap,setting_desiredDensity);
+
+    firstFrame->pointHessians.reserve(wG[0]*hG[0]*0.2f); // 20%的点数目
+	firstFrame->pointHessiansMarginalized.reserve(wG[0]*hG[0]*0.2f); // 被边缘化
+	firstFrame->pointHessiansOut.reserve(wG[0]*hG[0]*0.2f); // 丢掉的点
+
+    //[ ***step 2*** ] 求出平均尺度因子
+    float sumID=1e-5, numID=1e-5;
+	for(int i=0;i<coarseInitializer->numPoints[0];i++)
+	{
+		//? iR的值到底是啥
+		sumID += coarseInitializer->points[0][i].iR; // 第0层点的中位值, 相当于
+		numID++;
+	}
+    float rescaleFactor = 1 / (sumID / numID);  // 求出尺度因子
+
+	// randomly sub-select the points I need.
+	// 目标点数 / 实际提取点数    
+    float keepPercentage = setting_desiredPointDensity / coarseInitializer->numPoints[0];
+
+    if(!setting_debugout_runquiet)
+        printf("Initialization: keep %.1f%% (need %d, have %d)!\n", 100*keepPercentage,
+            (int)(setting_desiredPointDensity), coarseInitializer->numPoints[0] );
+
+    //[ ***step 3*** ] 创建PointHessian, 点加入关键帧, 加入EnergyFunctional
+    for(int i=0;i<coarseInitializer->numPoints[0];i++)
+    {
+        if(rand()/(float)RAND_MAX > keepPercentage) continue; // 如果提取的点比较少, 不执行; 提取的多, 则随机干掉
+
+		Pnt* point = coarseInitializer->points[0]+i;
+		ImmaturePoint* pt = new ImmaturePoint(point->u+0.5f,point->v+0.5f,firstFrame,point->my_type, &Hcalib);      
+
+        if(!std::isfinite(pt->energyTH)) { delete pt; continue; }  // 点值无穷大  
+
+        // 创建ImmaturePoint就为了创建PointHessian? 是为了接口统一吧
+        pt->idepth_max=pt->idepth_min=1;
+		PointHessian* ph = new PointHessian(pt, &Hcalib);
+		delete pt;
+		if(!std::isfinite(ph->energyTH)) {delete ph; continue;}
+    }
 }
 
 //* 计算frameHessian的预计算值, 和状态的delta值
@@ -161,5 +203,9 @@ void FullSystem::setPrecalcValues()
     for(FrameHessian* fh : frameHessians)
     {
         fh->targetPrecalc.resize(frameHessians.size());
+		for(unsigned int i=0;i<frameHessians.size();i++)  //? 还有自己和自己的???
+			fh->targetPrecalc[i].set(fh, frameHessians[i], &Hcalib); // 计算Host 与 target之间的变换关系
     }
+
+    ef->setDeltaF(&Hcalib);
 }

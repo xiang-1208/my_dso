@@ -89,6 +89,11 @@ namespace dso
     extern bool setting_render_plotTrackingFull ;
     extern bool setting_fullResetRequested;
 
+    extern bool setting_debugout_runquiet;
+    extern float setting_outlierTHSumComponent;
+
+    extern float setting_overallEnergyTHWeight;
+
     extern bool preload;
 
     extern int sparsityFactor;

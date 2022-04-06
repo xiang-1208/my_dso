@@ -7,6 +7,9 @@
 using namespace dso;
 
 class EFFrame;
+struct FrameHessian;
+struct CalibHessian;
+struct PointHessian;
 
 //? 这是干什么用的? 是为了求解时候的数值稳定? 
 #define SCALE_IDEPTH 1.0f			//!< 逆深度的比例系数  // scales internal value to idepth.
@@ -22,6 +25,25 @@ class EFFrame;
 struct FrameFramePrecalc
 {
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+
+	FrameHessian* host;	// defines row
+	FrameHessian* target;	// defines column
+
+	Mat33f PRE_RTll; // host 到 target 之间优化后旋转矩阵 R
+	Mat33f PRE_KRKiTll; // k*R*k_inv
+	Mat33f PRE_RKiTll;  // R*k_inv
+	Mat33f PRE_RTll_0; // host 到 target之间初始的旋转矩阵, 优化更新前
+
+	Vec3f PRE_tTll; //  host 到 target之间优化后的平移 t
+	Vec3f PRE_KtTll; // K*t
+	Vec3f PRE_tTll_0; //  host 到 target之间初始的平移, 优化更新前
+
+	float distanceLL; // 两帧间距离
+
+	Vec2f PRE_aff_mode; // 能量函数对仿射系数处理后的, 总系数
+	float PRE_b0_mode; // host的光度仿射系数b
+
+	void set(FrameHessian* host, FrameHessian* target, CalibHessian* HCalib);	
 };
 
 struct CalibHessian
@@ -33,6 +55,7 @@ struct CalibHessian
     float B[256];
 
     VecCf value_scaledf;
+	VecC value_minus_value_zero;	//!< 减去线性化点
 
     inline ~CalibHessian() {instanceCounter--;}
 	inline CalibHessian()
@@ -45,7 +68,7 @@ struct CalibHessian
 
 		// setValueScaled(initial_value);
 		// value_zero = value;
-		// value_minus_value_zero.setZero();
+		value_minus_value_zero.setZero();
 
 		instanceCounter++;
 		for(int i=0;i<256;i++)
@@ -74,11 +97,17 @@ struct FrameHessian
     FrameShell* shell;
     float ab_exposure;
 
+	std::vector<PointHessian*> pointHessians;				//!< contains all ACTIVE points.
+	std::vector<PointHessian*> pointHessiansMarginalized;	//!< contains all MARGINALIZED points (= fully marginalized, usually because point went OOB.)
+	std::vector<PointHessian*> pointHessiansOut;			//!< contains all OUTLIER points (= discarded.).
+	//std::vector<ImmaturePoint*> immaturePoints;				//!< contains all OUTLIER points (= discarded.).
 
     Eigen::Vector3f* dI;				//!< 图像导数 // trace, fine tracking. Used for direction select (not for gradient histograms etc.)
 	Eigen::Vector3f* dIp[PYR_LEVELS];	 // coarse tracking / coarse initializer. NAN in [0] only.
     float* absSquaredGrad[PYR_LEVELS];
 
+	SE3 PRE_worldToCam;			//!< 预计算的, 位姿状态增量更新到位姿上
+	SE3 PRE_camToWorld;
 	std::vector<FrameFramePrecalc,Eigen::aligned_allocator<FrameFramePrecalc>> targetPrecalc; //!< 对于其它帧的预运算值
 
 	int frameID;					//!< 所有关键帧的序号(FrameShell)
@@ -98,6 +127,7 @@ struct FrameHessian
 	EIGEN_STRONG_INLINE const SE3 &get_worldToCam_evalPT() const {return worldToCam_evalPT;}
     EIGEN_STRONG_INLINE const Vec10 &get_state_zero() const {return state_zero;}
     EIGEN_STRONG_INLINE const Vec10 &get_state() const {return state;}
+	EIGEN_STRONG_INLINE const Vec10 &get_state_scaled() const {return state_scaled;}
 	EIGEN_STRONG_INLINE const Vec10 get_state_minus_stateZero() const {return get_state()-get_state_zero();}
 
 	//* 获得先验信息矩阵
@@ -132,6 +162,7 @@ struct FrameHessian
 		return p;
 	}
 
+	inline AffLight aff_g2l() const {return AffLight(get_state_scaled()[6], get_state_scaled()[7]);} //* 返回光度仿射系数
 	inline AffLight aff_g2l_0()	const {return AffLight(get_state_zero()[6]*SCALE_A, get_state_zero()[7]*SCALE_B);} //* 返回线性化点处的仿射系数增量
 
     void makeImages(float* color, CalibHessian* HCalib);
@@ -142,4 +173,15 @@ struct FrameHessian
 	}
 };
 
+//* 点Hessian
+// hessian component associated with one point.
+struct PointHessian
+{
+	EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+
+	float idepth_zero;					//!< 缩放了scale倍的固定线性化点逆深度
+	float idepth;						//!< 缩放scale倍的逆深度	
+
+	PointHessian(const ImmaturePoint* const rawPoint, CalibHessian* Hcalib);
+};
 

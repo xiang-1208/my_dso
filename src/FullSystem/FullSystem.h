@@ -8,6 +8,7 @@
 #include "util/ImageAndExposure.h"
 #include "FullSystem/CoarseInitializer.h"
 #include "OptimizationBackend/EnergyFunctional.h"
+#include "ImmaturePoint.h"
 
 using namespace dso;
 

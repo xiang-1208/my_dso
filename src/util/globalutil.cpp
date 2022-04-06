@@ -53,6 +53,7 @@ namespace dso
     bool disableAllDisplay = false;
 
     bool setting_render_display3D = true;
+	bool setting_debugout_runquiet = false;
 
     float setting_desiredImmatureDensity = 1500; // immature points per frame
     float setting_desiredPointDensity = 2000; // aimed total points in the active window.
@@ -66,6 +67,8 @@ namespace dso
     float setting_maxAffineWeight= 2;
 
 	float setting_outlierTH = 12*12;					// higher -> less strict
+	float setting_outlierTHSumComponent = 50*50; 		// higher -> less strong gradient-based reweighting .
+	float setting_overallEnergyTHWeight = 1;
 
 	bool setting_render_displayResidual = true;
     bool setting_render_displayVideo = true;

@@ -17,6 +17,8 @@ typedef Eigen::Matrix<float, MAX_RES_PER_POINT,1> VecNRf;
 typedef Eigen::Matrix<double,3,3> Mat33;
 typedef Eigen::Matrix<double,6,6> Mat66;
 typedef Eigen::Matrix<double,8,8> Mat88;
+typedef Eigen::Matrix<float,2,2> Mat22f;
+typedef Eigen::Matrix<float,1,8> Mat18f;
 typedef Eigen::Matrix<float,8,8> Mat88f;
 typedef Eigen::Matrix<float,3,3> Mat33f;
 typedef Eigen::Matrix<float,9,9> Mat99f;

@@ -6,6 +6,7 @@
 class FrameHessian; //前向声明
 class EFResidual;
 class EFPoint;
+class PointHessian;
 
 class EFFrame
 {
@@ -38,6 +39,10 @@ public:
 
 	// contains all residuals.
 	std::vector<EFResidual*> residualsAll;	//!< 该点的所有残差
+
+	float deltaF;		//!< 当前逆深度和线性化处的差, 没有使用FEJ, 就是0
+
+	PointHessian* data;	//!< PointHessian数据
 
 
 };
