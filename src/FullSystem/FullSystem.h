@@ -28,12 +28,16 @@ public:
 
 protected:
 	void initializeFromInitializer(FrameHessian* fh);
+	void deliverTrackedFrame(FrameHessian* fh, bool needKF);
 
 	EnergyFunctional* ef;			//!< 能量方程
 
 	boost::mutex trackMutex;
 
 	boost::mutex mapMutex;
+
+	// mutex for camToWorl's in shells (these are always in a good configuration).
+	boost::mutex shellPoseMutex;
 
 	CalibHessian Hcalib;
 

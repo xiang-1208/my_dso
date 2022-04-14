@@ -49,6 +49,9 @@ namespace dso
 	float setting_initialAffAPrior = 1e14;
 	float setting_initialCalibHessian = 5e9;
 
+	/* some modes for solving the resulting linear system (e.g. orthogonalize wrt. unobservable dimensions) */
+	int setting_solverMode = SOLVER_FIX_LAMBDA | SOLVER_ORTHOGONALIZE_X_LATER;  // 还真是固定了lambda
+
     float playbackSpeed=0;	// 0 for linearize (play as fast as possible, while sequentializing tracking & mapping). otherwise, factor on timestamps.
     bool disableAllDisplay = false;
 

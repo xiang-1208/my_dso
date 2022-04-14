@@ -32,19 +32,34 @@ public:
 
 };
 
+enum EFPointStatus {PS_GOOD=0, PS_MARGINALIZE, PS_DROP};
+
 class EFPoint
 {
 public:
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 
+	EFPoint(PointHessian* d, EFFrame* host_) : data(d),host(host_)
+	{
+		takeData();
+		stateFlag=EFPointStatus::PS_GOOD;
+	}
+
+	void takeData();
+
 	// contains all residuals.
 	std::vector<EFResidual*> residualsAll;	//!< 该点的所有残差
 
+	float priorF;		//!< 逆深度先验信息矩阵, 初始化之后的有
 	float deltaF;		//!< 当前逆深度和线性化处的差, 没有使用FEJ, 就是0
+
+	EFFrame* host;
+
+	int idxInPoints;	//!< 当前点在EFFrame中id
 
 	PointHessian* data;	//!< PointHessian数据
 
-
+	EFPointStatus stateFlag; //!< 点的状态
 };
 
 class EFResidual

@@ -2,11 +2,13 @@
 #include <Eigen/Core>
 #include "FullSystem/FrameShell.h"
 #include "util/globalutil.h"
+#include "ImmaturePoint.h"
 
 
 using namespace dso;
 
 class EFFrame;
+class EFPoint;
 struct FrameHessian;
 struct CalibHessian;
 struct PointHessian;
@@ -20,6 +22,16 @@ struct PointHessian;
 #define SCALE_W 1.0f				//!< 不知道...
 #define SCALE_A 10.0f				//!< 光度仿射系数a的比例系数
 #define SCALE_B 1000.0f				//!< 光度仿射系数b的比例系数
+
+//上面的逆
+#define SCALE_IDEPTH_INVERSE (1.0f / SCALE_IDEPTH)
+#define SCALE_XI_ROT_INVERSE (1.0f / SCALE_XI_ROT)
+#define SCALE_XI_TRANS_INVERSE (1.0f / SCALE_XI_TRANS)
+#define SCALE_F_INVERSE (1.0f / SCALE_F)
+#define SCALE_C_INVERSE (1.0f / SCALE_C)
+#define SCALE_W_INVERSE (1.0f / SCALE_W)
+#define SCALE_A_INVERSE (1.0f / SCALE_A)
+#define SCALE_B_INVERSE (1.0f / SCALE_B)
 
 //* 其中带0的是FEJ用的初始状态, 不带0的是更新的状态
 struct FrameFramePrecalc
@@ -162,8 +174,45 @@ struct FrameHessian
 		return p;
 	}
 
+	//* 零空间, 好奇怎么求???
+	Mat66 nullspaces_pose;
+	Mat42 nullspaces_affine;
+	Vec6 nullspaces_scale;
+
+    inline Vec6 w2c_leftEps() const {return get_state_scaled().head<6>();}  //* 返回位姿状态增量
 	inline AffLight aff_g2l() const {return AffLight(get_state_scaled()[6], get_state_scaled()[7]);} //* 返回光度仿射系数
 	inline AffLight aff_g2l_0()	const {return AffLight(get_state_zero()[6]*SCALE_A, get_state_zero()[7]*SCALE_B);} //* 返回线性化点处的仿射系数增量
+
+	//* 设置增量, 传入state_scaled
+	inline void setStateScaled(const Vec10 &state_scaled)
+	{
+
+		this->state_scaled = state_scaled;
+		state.segment<3>(0) = SCALE_XI_TRANS_INVERSE * state_scaled.segment<3>(0);
+		state.segment<3>(3) = SCALE_XI_ROT_INVERSE * state_scaled.segment<3>(3);
+		state[6] = SCALE_A_INVERSE * state_scaled[6];
+		state[7] = SCALE_B_INVERSE * state_scaled[7];
+		state[8] = SCALE_A_INVERSE * state_scaled[8];
+		state[9] = SCALE_B_INVERSE * state_scaled[9];
+		
+		PRE_worldToCam = SE3::exp(w2c_leftEps()) * get_worldToCam_evalPT();
+		PRE_camToWorld = PRE_worldToCam.inverse();
+		//setCurrentNullspace();
+	};
+
+	//* 设置FEJ点状态增量
+	void setStateZero(const Vec10 &state_zero);
+
+	//* 设置当前位姿, 光度仿射系数, FEJ点
+	inline void setEvalPT_scaled(const SE3 &worldToCam_evalPT, const AffLight &aff_g2l)
+	{
+		Vec10 initial_state = Vec10::Zero();
+		initial_state[6] = aff_g2l.a; // 直接设置光度系数a和b
+		initial_state[7] = aff_g2l.b;
+		this->worldToCam_evalPT = worldToCam_evalPT;
+		setStateScaled(initial_state);
+		setStateZero(this->get_state());
+	};
 
     void makeImages(float* color, CalibHessian* HCalib);
 
@@ -178,10 +227,42 @@ struct FrameHessian
 struct PointHessian
 {
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+	EFPoint* efPoint; 						//!< 点的能量函数
+
+	bool hasDepthPrior;					//!< 初始化得到的点是有深度先验的, 其它没有
 
 	float idepth_zero;					//!< 缩放了scale倍的固定线性化点逆深度
 	float idepth;						//!< 缩放scale倍的逆深度	
+	float idepth_scaled;				//!< target还是host上点逆深度 ??
+	float idepth_zero_scaled;			//!< FEJ使用, 点在host上x=0初始逆深度
+
+	float energyTH;						//!< 光度误差阈值
+	float nullspaces_scale;				//!< 零空间 ?
+
+	FrameHessian* host;					//!< 主帧
+
+	enum PtStatus {ACTIVE=0, INACTIVE, OUTLIER, OOB, MARGINALIZED};  // 这些状态都没啥用.....
+	PtStatus status;
 
 	PointHessian(const ImmaturePoint* const rawPoint, CalibHessian* Hcalib);
+
+	inline void setPointStatus(PtStatus s) {status=s;}
+
+	//* 各种设置逆深度
+	inline void setIdepth(float idepth) {
+		this->idepth = idepth;
+		this->idepth_scaled = SCALE_IDEPTH * idepth;
+    }
+	inline void setIdepthScaled(float idepth_scaled) {
+		this->idepth = SCALE_IDEPTH_INVERSE * idepth_scaled;
+		this->idepth_scaled = idepth_scaled;
+    }
+	inline void setIdepthZero(float idepth) {
+		idepth_zero = idepth;
+		idepth_zero_scaled = SCALE_IDEPTH * idepth;
+		nullspaces_scale = -(idepth*1.001 - idepth/1.001)*500; //? 为啥这么求
+    }
+
+	
 };
 

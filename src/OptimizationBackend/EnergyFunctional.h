@@ -29,6 +29,8 @@ public:
 	MatXX HM;					//!< 优化的Hessian矩阵, 边缘化掉逆深度
 	VecX bM;					//!< 优化的Jr项, 边缘化掉逆深度
 
+	EFPoint* insertPoint(PointHessian* ph);
+
 	std::map<uint64_t, // 历史ID
 	    Eigen::Vector2i,
 	    std::less<uint64_t>, 

@@ -7,6 +7,19 @@
 
 namespace dso
 {
+    #define SOLVER_SVD (int)1
+    #define SOLVER_ORTHOGONALIZE_SYSTEM (int)2
+    #define SOLVER_ORTHOGONALIZE_POINTMARG (int)4
+    #define SOLVER_ORTHOGONALIZE_FULL (int)8
+    #define SOLVER_SVD_CUT7 (int)16
+    #define SOLVER_REMOVE_POSEPRIOR (int)32
+    #define SOLVER_USE_GN (int)64
+    #define SOLVER_FIX_LAMBDA (int)128
+    #define SOLVER_ORTHOGONALIZE_X (int)256
+    #define SOLVER_MOMENTUM (int)512
+    #define SOLVER_STEPMOMENTUM (int)1024
+    #define SOLVER_ORTHOGONALIZE_X_LATER (int)2048
+
     #define patternNum 8
 
     extern int pyrLevelsUsed;
@@ -68,6 +81,8 @@ namespace dso
     extern float setting_desiredPointDensity;
     extern float setting_minPointsRemaining;
     extern float setting_maxLogAffFacInWindow;
+
+    extern int setting_solverMode;
 
     extern int setting_minFrames;
     extern int setting_maxFrames;

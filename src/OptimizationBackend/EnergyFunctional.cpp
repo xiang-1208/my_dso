@@ -87,6 +87,21 @@ void EnergyFunctional::setDeltaF(CalibHessian* HCalib)
 	EFDeltaValid = true;	
 }
 
+//@ 向能量函数中插入一个点, 放入对应的EFframe
+EFPoint* EnergyFunctional::insertPoint(PointHessian* ph)
+{
+	EFPoint* efp = new EFPoint(ph, ph->host->efFrame);
+	efp->idxInPoints = ph->host->efFrame->points.size();
+	ph->host->efFrame->points.push_back(efp);
+
+	nPoints++;
+	ph->efPoint = efp;
+
+	EFIndicesValid = false; // 有插入需要重新梳理残差的ID
+
+	return efp;
+}
+
 //@ 设置EFFrame, EFPoint, EFResidual对应的 ID 号
 void EnergyFunctional::makeIDX()
 {

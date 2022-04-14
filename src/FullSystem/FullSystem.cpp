@@ -132,11 +132,31 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
             std::cout << "初始化完成" <<std::endl;
             initializeFromInitializer(fh);
             lock.unlock();
+            //deliverTrackedFrame(fh, true);
         }
+		else
+		{
+			// if still initializing
+			fh->shell->poseValid = false;
+			delete fh;
+		}
+        return;
     }
     else
     {
+        //[ ***step 5*** ] 对新来的帧进行跟踪, 得到位姿光度, 判断跟踪状态  
+        // =========================== SWAP tracking reference?. =========================
+        //if(coarseTracker_forNewKF->refFrameID > coarseTracker->refFrameID)
+        std::cout << "初始化后一帧" <<std::endl;
+        return;
     }
+}
+
+//@ 把跟踪的帧, 给到建图线程, 设置成关键帧或非关键帧
+void FullSystem::deliverTrackedFrame(FrameHessian* fh, bool needKF)
+{
+    //建图
+
 }
 
 //@ 从初始化中提取出信息, 用于跟踪.
@@ -160,6 +180,8 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	firstFrame->pointHessiansMarginalized.reserve(wG[0]*hG[0]*0.2f); // 被边缘化
 	firstFrame->pointHessiansOut.reserve(wG[0]*hG[0]*0.2f); // 丢掉的点
 
+    std::cout<<"1 finish" <<std::endl;
+
     //[ ***step 2*** ] 求出平均尺度因子
     float sumID=1e-5, numID=1e-5;
 	for(int i=0;i<coarseInitializer->numPoints[0];i++)
@@ -178,6 +200,8 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
         printf("Initialization: keep %.1f%% (need %d, have %d)!\n", 100*keepPercentage,
             (int)(setting_desiredPointDensity), coarseInitializer->numPoints[0] );
 
+    std::cout<<"2 finish" <<std::endl;
+
     //[ ***step 3*** ] 创建PointHessian, 点加入关键帧, 加入EnergyFunctional
     for(int i=0;i<coarseInitializer->numPoints[0];i++)
     {
@@ -193,7 +217,41 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		PointHessian* ph = new PointHessian(pt, &Hcalib);
 		delete pt;
 		if(!std::isfinite(ph->energyTH)) {delete ph; continue;}
+
+		ph->setIdepthScaled(point->iR*rescaleFactor);  //? 为啥设置的是scaled之后的
+		ph->setIdepthZero(ph->idepth);			//! 设置初始先验值, 还有神奇的求零空间方法
+		ph->hasDepthPrior=true;
+		ph->setPointStatus(PointHessian::ACTIVE);	// 激活点
+
+		firstFrame->pointHessians.push_back(ph);
+		ef->insertPoint(ph);
     }
+
+    std::cout<<"3 finish" <<std::endl;
+
+    //[ ***step 4*** ] 设置第一帧和最新帧的待优化量, 参考帧
+    SE3 firstToNew = coarseInitializer->thisToNext;
+    firstToNew.translation() /= rescaleFactor;      //?????
+
+	// really no lock required, as we are initializing.
+	{
+		boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
+		firstFrame->shell->camToWorld = SE3();		// 空的初值?
+		firstFrame->shell->aff_g2l = AffLight(0,0);
+		firstFrame->setEvalPT_scaled(firstFrame->shell->camToWorld.inverse(),firstFrame->shell->aff_g2l);
+		firstFrame->shell->trackingRef=0;
+		firstFrame->shell->camToTrackingRef = SE3();
+
+		newFrame->shell->camToWorld = firstToNew.inverse();
+		newFrame->shell->aff_g2l = AffLight(0,0);
+		newFrame->setEvalPT_scaled(newFrame->shell->camToWorld.inverse(),newFrame->shell->aff_g2l);
+		newFrame->shell->trackingRef = firstFrame->shell;
+		newFrame->shell->camToTrackingRef = firstToNew.inverse();
+
+	}
+
+	initialized=true;
+	printf("INITIALIZE FROM INITIALIZER (%d pts)!\n", (int)firstFrame->pointHessians.size());    
 }
 
 //* 计算frameHessian的预计算值, 和状态的delta值

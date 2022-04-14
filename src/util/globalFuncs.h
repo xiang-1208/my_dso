@@ -1,6 +1,7 @@
 #pragma once
 #include <Eigen/Core>
 #include "util/globalutil.h"
+#include "util/NumType.h"
 
 using namespace dso;
 
