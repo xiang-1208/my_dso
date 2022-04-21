@@ -112,7 +112,7 @@ struct FrameHessian
 	std::vector<PointHessian*> pointHessians;				//!< contains all ACTIVE points.
 	std::vector<PointHessian*> pointHessiansMarginalized;	//!< contains all MARGINALIZED points (= fully marginalized, usually because point went OOB.)
 	std::vector<PointHessian*> pointHessiansOut;			//!< contains all OUTLIER points (= discarded.).
-	//std::vector<ImmaturePoint*> immaturePoints;				//!< contains all OUTLIER points (= discarded.).
+	std::vector<ImmaturePoint*> immaturePoints;				//!< contains all OUTLIER points (= discarded.).
 
     Eigen::Vector3f* dI;				//!< 图像导数 // trace, fine tracking. Used for direction select (not for gradient histograms etc.)
 	Eigen::Vector3f* dIp[PYR_LEVELS];	 // coarse tracking / coarse initializer. NAN in [0] only.
@@ -230,6 +230,13 @@ struct PointHessian
 	EFPoint* efPoint; 						//!< 点的能量函数
 
 	bool hasDepthPrior;					//!< 初始化得到的点是有深度先验的, 其它没有
+
+	// static values
+	float color[MAX_RES_PER_POINT];			// colors in host frame
+	float weights[MAX_RES_PER_POINT];		// host-weights for respective residuals.
+
+
+	float u,v;							//!< 像素点的位置
 
 	float idepth_zero;					//!< 缩放了scale倍的固定线性化点逆深度
 	float idepth;						//!< 缩放scale倍的逆深度	

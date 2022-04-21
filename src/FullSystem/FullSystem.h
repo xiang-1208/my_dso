@@ -9,6 +9,7 @@
 #include "FullSystem/CoarseInitializer.h"
 #include "OptimizationBackend/EnergyFunctional.h"
 #include "ImmaturePoint.h"
+#include "FullSystem/CoarseTracker.h"
 
 using namespace dso;
 
@@ -22,6 +23,8 @@ public:
 	void addActiveFrame( ImageAndExposure* image, int id );
 
 	bool linearizeOperation;
+
+	bool initFailed; 
 	bool initialized;
 	bool isLost;
 	std::vector<IOWrap::Output3DWrapper*> outputWrapper;
@@ -29,6 +32,7 @@ public:
 protected:
 	void initializeFromInitializer(FrameHessian* fh);
 	void deliverTrackedFrame(FrameHessian* fh, bool needKF);
+	void traceNewCoarse(FrameHessian* fh);
 
 	EnergyFunctional* ef;			//!< 能量方程
 
@@ -61,6 +65,10 @@ protected:
 	std::vector<FrameShell*> allKeyFramesHistory;
 	std::vector<FrameHessian*> frameHessians;	//!< 关键帧 // ONLY changed in marginalizeFrame and addFrame.
 
+	CoarseTracker* coarseTracker_forNewKF;			// set as as reference. protected by [coarseTrackerSwapMutex].
+	CoarseTracker* coarseTracker;					// always used to track new frames. protected by [trackMutex].
 	
-	
+	int lastRefStopID;
+
+	void makeKeyFrame( FrameHessian* fh);
 };

@@ -28,4 +28,12 @@ void displayImage(const char* windowName, const MinimalImageB3* img, bool autoSi
 	displayImage(windowName, cv::Mat(img->h, img->w, CV_8UC3, img->data), autoSize);
 }
 
+int waitKey(int milliseconds)
+{
+	if(disableAllDisplay) return 0;
+
+	boost::unique_lock<boost::mutex> lock(openCVdisplayMutex);
+	return cv::waitKey(milliseconds);
+}
+
 }

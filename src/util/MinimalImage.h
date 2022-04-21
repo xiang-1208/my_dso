@@ -20,6 +20,15 @@ public:
 		ownData=true;
 	}
 
+	/*
+	 * creates minimal image wrapping around existing memory
+	 */
+	inline MinimalImage(int w_, int h_, T* data_) : w(w_), h(h_)
+	{
+		data = data_;
+		ownData=false;
+	}
+
 	inline void setBlack()
 	{
 		memset(data, 0, sizeof(T)*w*h);
@@ -50,3 +59,4 @@ private:
 
 typedef MinimalImage<unsigned char> MinimalImageB;
 typedef MinimalImage<Vec3b> MinimalImageB3;
+typedef MinimalImage<Vec3f> MinimalImageF3;

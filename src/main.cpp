@@ -13,7 +13,7 @@
 
 void parseArgument(char* arg);
 
-int main( int argc, char** argv )
+int main(int argc, char** argv )
 {
     //参数读取
     for(int i=1; i<argc;i++)
@@ -126,7 +126,7 @@ int main( int argc, char** argv )
 
 			delete img;
 
-			if(fullSystem->initialized || setting_fullResetRequested)
+			if(fullSystem->initFailed || setting_fullResetRequested)
 			{
 				if(ii < 250 || setting_fullResetRequested)
                 {

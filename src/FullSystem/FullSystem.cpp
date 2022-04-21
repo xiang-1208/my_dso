@@ -65,12 +65,17 @@ FullSystem::FullSystem()
     assert(retstat!=293847);
 
     coarseInitializer = new CoarseInitializer(wG[0], hG[0]);
+    coarseTracker = new CoarseTracker(wG[0], hG[0]);
+    coarseTracker_forNewKF = new CoarseTracker(wG[0], hG[0]);
 
     ef = new EnergyFunctional();
 
     //selectionMap = new float[wG[0]*hG[0]];
     initialized=false;
+    initFailed=false;
     isLost=false;
+
+    lastRefStopID=0;
 }
 
 void FullSystem::setGammaFunction(float* BInv)
@@ -146,8 +151,8 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
     {
         //[ ***step 5*** ] 对新来的帧进行跟踪, 得到位姿光度, 判断跟踪状态  
         // =========================== SWAP tracking reference?. =========================
-        //if(coarseTracker_forNewKF->refFrameID > coarseTracker->refFrameID)
-        std::cout << "初始化后一帧" <<std::endl;
+        if(coarseTracker_forNewKF->refFrameID > coarseTracker->refFrameID)
+        //std::cout << "初始化后一帧" <<std::endl;
         return;
     }
 }
@@ -155,13 +160,87 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 //@ 把跟踪的帧, 给到建图线程, 设置成关键帧或非关键帧
 void FullSystem::deliverTrackedFrame(FrameHessian* fh, bool needKF)
 {
-    //建图
+	//! 顺序执行
+	if(linearizeOperation) 
+    {
+        if(goStepByStep && lastRefStopID != coarseTracker->refFrameID)
+        {
+            MinimalImageF3 img(wG[0], hG[0], fh->dI);
+            //IOWrap::displayImage("frameToTrack", &img);
+			while(true)
+			{
+				char k=IOWrap::waitKey(0);
+				if(k==' ') break;
+				handleKey( k );
+			}
+            lastRefStopID = coarseTracker->refFrameID;
+        }
+        else handleKey( IOWrap::waitKey(1) );
 
+		//if(needKF) makeKeyFrame(fh);
+		//else makeNonKeyFrame(fh);
+    }
+
+
+}
+
+//@ 生成关键帧, 优化, 激活点, 提取点, 边缘化关键帧
+void FullSystem::makeKeyFrame( FrameHessian* fh)
+{
+    //[ ***step 1*** ] 设置当前估计的fh的位姿, 光度参数
+	{	// 同样取出位姿, 当前的作为最终值
+		//? 为啥要从shell来设置 ???   答: 因为shell不删除, 而且参考帧还会被优化, shell是桥梁
+		boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
+		assert(fh->shell->trackingRef != 0);
+		fh->shell->camToWorld = fh->shell->trackingRef->camToWorld * fh->shell->camToTrackingRef;
+		fh->setEvalPT_scaled(fh->shell->camToWorld.inverse(),fh->shell->aff_g2l); // 待优化值
+	}   
+
+    //[ ***step 2*** ] 把这一帧来更新之前帧的未成熟点
+	traceNewCoarse(fh); // 更新未成熟点(深度未收敛的点)     
+}
+
+//@ 利用新的帧 fh 对关键帧中的ImmaturePoint进行更新
+void FullSystem::traceNewCoarse(FrameHessian* fh)
+{
+    boost::unique_lock<boost::mutex> lock(mapMutex);
+
+	int trace_total=0, trace_good=0, trace_oob=0, trace_out=0, trace_skip=0, trace_badcondition=0, trace_uninitialized=0;
+
+	Mat33f K = Mat33f::Identity();
+	K(0,0) = Hcalib.fxl();
+	K(1,1) = Hcalib.fyl();
+	K(0,2) = Hcalib.cxl();
+	K(1,2) = Hcalib.cyl();
+
+	// 遍历关键帧
+	for(FrameHessian* host : frameHessians)		// go through all active frames
+	{   
+        SE3 hostToNew = fh->PRE_worldToCam * host->PRE_camToWorld;
+        Mat33f KRKi = K * hostToNew.rotationMatrix().cast<float>() * K.inverse();
+        Vec3f Kt = K * hostToNew.translation().cast<float>();
+
+        Vec2f aff = AffLight::fromToVecExposure(host->ab_exposure, fh->ab_exposure, host->aff_g2l(), fh->aff_g2l()).cast<float>();
+
+		for(ImmaturePoint* ph : host->immaturePoints)
+		{
+			ph->traceOn(fh, KRKi, Kt, aff, &Hcalib, false );
+			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_GOOD) trace_good++;
+			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_BADCONDITION) trace_badcondition++;
+			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_OOB) trace_oob++;
+			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_OUTLIER) trace_out++;
+			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_SKIPPED) trace_skip++;
+			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_UNINITIALIZED) trace_uninitialized++;
+			trace_total++;
+		}        
+    }        
 }
 
 //@ 从初始化中提取出信息, 用于跟踪.
 void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 {
+    std::cout<<"1 start" <<std::endl;
+    
     boost::unique_lock<boost::mutex> lock(mapMutex);
 
     //[ ***step 1*** ] 把第一帧设置成关键帧, 加入队列, 加入EnergyFunctional
@@ -180,7 +259,6 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	firstFrame->pointHessiansMarginalized.reserve(wG[0]*hG[0]*0.2f); // 被边缘化
 	firstFrame->pointHessiansOut.reserve(wG[0]*hG[0]*0.2f); // 丢掉的点
 
-    std::cout<<"1 finish" <<std::endl;
 
     //[ ***step 2*** ] 求出平均尺度因子
     float sumID=1e-5, numID=1e-5;
@@ -199,8 +277,6 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
     if(!setting_debugout_runquiet)
         printf("Initialization: keep %.1f%% (need %d, have %d)!\n", 100*keepPercentage,
             (int)(setting_desiredPointDensity), coarseInitializer->numPoints[0] );
-
-    std::cout<<"2 finish" <<std::endl;
 
     //[ ***step 3*** ] 创建PointHessian, 点加入关键帧, 加入EnergyFunctional
     for(int i=0;i<coarseInitializer->numPoints[0];i++)
@@ -226,8 +302,6 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		firstFrame->pointHessians.push_back(ph);
 		ef->insertPoint(ph);
     }
-
-    std::cout<<"3 finish" <<std::endl;
 
     //[ ***step 4*** ] 设置第一帧和最新帧的待优化量, 参考帧
     SE3 firstToNew = coarseInitializer->thisToNext;
@@ -262,7 +336,7 @@ void FullSystem::setPrecalcValues()
     {
         fh->targetPrecalc.resize(frameHessians.size());
 		for(unsigned int i=0;i<frameHessians.size();i++)  //? 还有自己和自己的???
-			fh->targetPrecalc[i].set(fh, frameHessians[i], &Hcalib); // 计算Host 与 target之间的变换关系
+			fh->targetPrecalc[i].set(fh, frameHessians[i], &Hcalib); // 计算Host 与 target之间的变换关系	
     }
 
     ef->setDeltaF(&Hcalib);

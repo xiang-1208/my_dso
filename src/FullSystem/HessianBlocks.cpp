@@ -142,5 +142,19 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 PointHessian::PointHessian(const ImmaturePoint* const rawPoint, CalibHessian* Hcalib)
 {
 	energyTH = rawPoint->energyTH;
+	host = rawPoint->host; // 主帧
+	hasDepthPrior=false;
+
+	// set static values & initialization.
+	u = rawPoint->u;
+	v = rawPoint->v;	
+	assert(std::isfinite(rawPoint->idepth_max));
+	//idepth_init = rawPoint->idepth_GT;
+
+	int n = patternNum;
+	memcpy(color, rawPoint->color, sizeof(float)*n);// 一个点对应8个像素
+	memcpy(weights, rawPoint->weights, sizeof(float)*n);
+
+	efPoint=0; // 指针=0
 }
 

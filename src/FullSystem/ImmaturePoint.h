@@ -2,6 +2,7 @@
 #include <Eigen/Core>
 #include "util/globalFuncs.h"
 #include "util/NumType.h"
+#include "IOWrapper/ImageDisplay.h"
 
 class FrameHessian;
 class CalibHessian;
@@ -30,6 +31,8 @@ public:
 
     Mat22f gradH;				//!< 图像梯度hessian矩阵
 
+	ImmaturePointStatus traceOn(FrameHessian* frame, const Mat33f &hostToFrame_KRKi, const Vec3f &hostToFrame_Kt, const Vec2f &hostToFrame_affine, CalibHessian* HCalib, bool debugPrint=false);
+
     float u,v;					//!< host里的像素坐标  
     FrameHessian* host;
 	float my_type;
@@ -42,6 +45,8 @@ public:
     float quality;				//!< 第二误差/第一误差 作为搜索质量, 越大越好
 
     ImmaturePointStatus lastTraceStatus;		//!< 上一次跟踪状态
+	Vec2f lastTraceUV;							//!< 上一次搜索得到的位置
+	float lastTracePixelInterval;				//!< 上一次的搜索范围长度
 
     ImmaturePoint(int u_, int v_, FrameHessian* host_, float type, CalibHessian* HCalib);
 };

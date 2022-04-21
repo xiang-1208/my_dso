@@ -10,6 +10,10 @@ message("Current Cmake version is : " ${CMAKE_VERSION})
 
 find_package(LibZip QUIET)
 
+# SET(CMAKE_BUILD_TYPE "Debug")
+# SET(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O3 -Wall -g2 -ggdb")
+# SET(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall")
+
 
 ########################
 # set compile options  #
@@ -60,7 +64,10 @@ if (BUILD_WITH_Pangolin)
     message("Pangolin [OK]: " ${Pangolin_INCLUDE_DIRS})
 endif (BUILD_WITH_Pangolin)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -pthread")
+add_definitions("-DENABLE_SSE")
+# set(CMAKE_CXX_FLAGS
+#    "${SSE_FLAGS} -O3 -g -std=c++0x -march=native -pthread")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++11 -pthread")
 
 
 ########################
@@ -110,6 +117,7 @@ add_library(my_lib src/util/DatasetReader.cpp /
                     src/FullSystem/FullSystem.cpp
                     src/FullSystem/ImmaturePoint.cpp
                     src/OptimizationBackend/EnergyFunctional.cpp
+                    src/FullSystem/CoarseTracker.cpp
                     src/OptimizationBackend/EnergyFunctionalStructs.cpp)
 add_executable(my_dso src/main.cpp )
 target_link_libraries(my_dso my_lib)

@@ -50,13 +50,23 @@ namespace dso
     extern bool reverse;
     extern bool setting_logStuff; 
 
+    extern float setting_maxPixSearch;
+    extern float setting_trace_slackInterval;
+    extern float setting_trace_stepsize;
+    extern float setting_trace_minImprovementFactor;
+    extern int setting_minTraceTestRadius;
+    extern int setting_trace_GNIterations;
+    extern float setting_trace_GNThreshold;
+
 	extern float setting_idepthFixPrior;
 	extern float setting_idepthFixPriorMargFac;
 	extern float setting_initialRotPrior;
 	extern float setting_initialTransPrior;
 	extern float setting_initialAffBPrior;
 	extern float setting_initialAffAPrior;
-	extern float setting_initialCalibHessian;  
+	extern float setting_initialCalibHessian; 
+    extern float setting_trace_extraSlackOnTH; 
+
 
     extern int setting_photometricCalibration ;
     extern float setting_affineOptModeA; //-1: fix. >=0: optimize (with prior, if > 0).
@@ -122,5 +132,9 @@ namespace dso
 	extern float freeDebugParam3;
 	extern float freeDebugParam4;
 	extern float freeDebugParam5;
+
+    extern bool goStepByStep;
+
+    void handleKey(char k);
     
 }

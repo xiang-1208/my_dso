@@ -13,16 +13,18 @@ namespace dso
     	  cxiG[PYR_LEVELS], cyiG[PYR_LEVELS];
     Eigen::Matrix3f KG[PYR_LEVELS], KiG[PYR_LEVELS];
 
-    std::string vignette = "";
-    std::string gammaCalib = "";
-    std::string source = "";
-    std::string calib = "";
+    std::string vignette = "/home/xiang/dataset/tum/sequence_01/vignette.png";
+    std::string gammaCalib = "/home/xiang/dataset/tum/sequence_01/pcalib.txt";
+    std::string source = "/home/xiang/dataset/tum/sequence_01/images.zip";
+    std::string calib = "/home/xiang/dataset/tum/sequence_01/camera.txt";
     // 2022.1.12
     std::string undistortion = "";
     // 2022.1.12
     std::string extrinsic = "";
+
+	int mode=0;
+
     bool useSampleOutput=false;
-    int mode=0;
     int start=0;
     int end=100000; 
 
@@ -40,6 +42,15 @@ namespace dso
 	float setting_gradDownweightPerLevel = 0.75;
 	bool  setting_selectDirectionDistribution = true;
 	int setting_gammaWeightsPixelSelect = 1; // 1 = use original intensity for pixel selection; 0 = use gamma-corrected intensity.
+
+	float setting_maxPixSearch = 0.027; // max length of the ep. line segment searched during immature point tracking. relative to image resolution.
+	float setting_trace_slackInterval = 1.5;			// if pixel-interval is smaller than this, leave it be.
+	float setting_trace_stepsize = 1.0;				// stepsize for initial discrete search.
+	float setting_trace_minImprovementFactor = 2;		// if pixel-interval is smaller than this, leave it be.
+	int setting_minTraceTestRadius = 2;
+	int setting_trace_GNIterations = 3;				// max # GN iterations
+	float setting_trace_GNThreshold = 0.1;				// GN stop after this stepsize.
+	float setting_trace_extraSlackOnTH = 1.2;			// for energy-based outlier check, be slightly more relaxed by this factor.
 
 	float setting_idepthFixPrior = 50*50;
 	float setting_idepthFixPriorMargFac = 600*600;
@@ -96,6 +107,25 @@ namespace dso
 	float freeDebugParam3 = 1;
 	float freeDebugParam4 = 1;
 	float freeDebugParam5 = 1;
+
+	bool goStepByStep = false;
+
+	void handleKey(char k)
+	{
+		char kkk = k;
+		switch(kkk)
+		{
+		case 'd': case 'D':
+			freeDebugParam5 = ((int)(freeDebugParam5+1))%10;
+			printf("new freeDebugParam5: %f!\n", freeDebugParam5);
+			break;
+		case 's': case 'S':
+			freeDebugParam5 = ((int)(freeDebugParam5-1+10))%10;
+			printf("new freeDebugParam5: %f!\n", freeDebugParam5);
+			break;
+		}
+	
+	}
 
 
 int staticPattern[10][40][2] = {

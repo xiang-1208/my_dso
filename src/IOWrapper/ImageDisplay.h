@@ -10,4 +10,6 @@ using namespace dso;
 namespace IOWrap
 {
 void displayImage(const char* windowName, const MinimalImageB3* img, bool autoSize = false);
+
+int waitKey(int milliseconds);
 }

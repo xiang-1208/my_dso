@@ -11,6 +11,7 @@ EnergyFunctional::EnergyFunctional()
 
 	adHostF=0;
 	adTargetF=0;
+	adHTdeltaF=0;
 
 	HM = MatXX::Zero(CPARS,CPARS); // 初始的, 后面增加frame改变
 	bM = VecX::Zero(CPARS);
@@ -61,7 +62,8 @@ EFFrame* EnergyFunctional::insertFrame(FrameHessian* fh, CalibHessian* Hcalib)
 void EnergyFunctional::setDeltaF(CalibHessian* HCalib)
 {
 	if(adHTdeltaF != 0) delete[] adHTdeltaF;
-	adHTdeltaF = new Mat18f[nFrames*nFrames];	
+	adHTdeltaF = new Mat18f[nFrames*nFrames];
+	std::cout << "!!!!!!!!!!!!!!!!!!!!!!!" <<std::endl;	
 
 	for(int h=0;h<nFrames;h++)
 		for(int t=0;t<nFrames;t++)
@@ -90,7 +92,8 @@ void EnergyFunctional::setDeltaF(CalibHessian* HCalib)
 //@ 向能量函数中插入一个点, 放入对应的EFframe
 EFPoint* EnergyFunctional::insertPoint(PointHessian* ph)
 {
-	EFPoint* efp = new EFPoint(ph, ph->host->efFrame);
+	EFPoint* efp = 0;
+	efp = new EFPoint(ph, ph->host->efFrame);
 	efp->idxInPoints = ph->host->efFrame->points.size();
 	ph->host->efFrame->points.push_back(efp);
 

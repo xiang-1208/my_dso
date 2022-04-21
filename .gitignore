@@ -13,3 +13,5 @@ _deps
 
 .vscode
 build
+.VSCodeCounter
+
